@@ -1,0 +1,21 @@
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: none
+    properties:
+      hibernate:
+        format_sql: false
+        dialect: org.hibernate.dialect.MySQLDialect
+        timezone.default_storage: NORMALIZE_UTC
+        type.preferred_uuid_jdbc_type: CHAR
+
+cozy:
+  security:
+    mock-user-enabled: true
+    mock-user-id: 00000000-0000-0000-0000-000000000001
+    mock-user-email: test@cozy.local
+
+logging:
+  level:
+    root: WARN
+    com.cozy: INFO

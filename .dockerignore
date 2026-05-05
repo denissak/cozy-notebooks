@@ -1,0 +1,10 @@
+.gradle/
+build/
+out/
+.idea/
+.vscode/
+*.iml
+.git/
+.github/
+README.md
+docker-compose.yml

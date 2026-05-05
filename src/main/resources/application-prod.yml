@@ -1,0 +1,66 @@
+# Production profile.
+#
+# Activated by SPRING_PROFILES_ACTIVE=prod. All credentials and the JDBC URL
+# are read from environment variables — nothing is hardcoded here.
+#
+# Required environment variables:
+#   DB_URL       e.g. jdbc:mysql://mysql:3306/cozy_notebooks?...&serverTimezone=UTC
+#   DB_USERNAME  database user (e.g. cozy)
+#   DB_PASSWORD  database password
+#
+# Schema is owned by Flyway. Hibernate runs in validate mode so the
+# application fails fast on startup if entity mappings drift from the
+# Flyway-managed schema.
+
+spring:
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 30000
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: false
+        jdbc.lob.non_contextual_creation: true
+        dialect: org.hibernate.dialect.MySQLDialect
+        timezone.default_storage: NORMALIZE_UTC
+        type.preferred_uuid_jdbc_type: CHAR
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: false
+    locations: classpath:db/migration
+
+server:
+  port: ${SERVER_PORT:8080}
+  error:
+    include-message: never
+    include-stacktrace: never
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+
+cozy:
+  security:
+    mock-user-enabled: ${COZY_MOCK_USER_ENABLED:false}
+
+logging:
+  level:
+    root: INFO
+    org.springframework.web: WARN
+    org.hibernate.SQL: WARN

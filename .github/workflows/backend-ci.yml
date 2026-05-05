@@ -1,0 +1,81 @@
+name: Backend CI
+
+# Production-style CI for the Spring Boot backend.
+#
+# Strategy: a real MySQL 8.4 container runs as a GitHub Actions service on
+# localhost:3306, and the test JVM uses USE_LOCAL_MYSQL=true so
+# AbstractIntegrationTest skips Testcontainers entirely and connects to that
+# service directly. This mirrors the local IntelliJ run configuration.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: Build & test (MySQL service)
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: cozy_notebooks
+          MYSQL_USER: cozy
+          MYSQL_PASSWORD: cozy
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -ucozy -pcozy"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=30
+
+    env:
+      USE_LOCAL_MYSQL: "true"
+      TESTCONTAINERS_RYUK_DISABLED: "true"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Wait for MySQL
+        run: |
+          for i in {1..30}; do
+            if mysqladmin ping -h 127.0.0.1 -P 3306 -ucozy -pcozy --silent; then
+              echo "MySQL is up."
+              exit 0
+            fi
+            echo "Waiting for MySQL... ($i)"
+            sleep 2
+          done
+          echo "MySQL did not become ready in time."
+          exit 1
+
+      - name: Run tests
+        run: ./gradlew --no-daemon clean test
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-reports
+          path: |
+            build/reports/tests/test
+            build/test-results/test
+          if-no-files-found: ignore

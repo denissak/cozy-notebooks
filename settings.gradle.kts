@@ -1,1 +1,1 @@
-rootProject.name = "cozy-notebooks"
+rootProject.name = "Cozy-notebooks"

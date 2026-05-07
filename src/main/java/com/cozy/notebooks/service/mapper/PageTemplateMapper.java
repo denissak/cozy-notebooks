@@ -13,7 +13,8 @@ public class PageTemplateMapper {
                 e.getName(),
                 e.getDescription(),
                 e.getIcon(),
-                e.getBlocks(),
+                e.getContentJson(),
+                e.getContentHash(),
                 e.isBuiltIn(),
                 e.getCreatedAt(),
                 e.getUpdatedAt()

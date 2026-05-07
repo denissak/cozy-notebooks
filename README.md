@@ -85,21 +85,31 @@ the MVP that filter is `MockAuthenticationFilter`, which puts a fixed
 
 Nothing in services, controllers, or DTOs needs to change.
 
-## Page vs Block
+## Page document storage
 
-A `Page` stores **metadata only** (title, icon, cover, position, favorite,
-parent page). All content lives in `Block` rows attached to that page,
-ordered by `position`.
+A page is a self-contained JSON document. `pages.content_json` holds the
+**entire** page — including its internal block array — and the backend
+treats that JSON as opaque. The frontend owns block-level structure,
+ordering, and per-type schemas. There is no separate `blocks` table and no
+block-level API.
 
-### Block types
+Each page row also carries:
 
-```
-paragraph, heading, todo, checklist, quote, callout, divider,
-image, file, audio, code, table, date, mood, habit, rating, spacer
-```
+- `content_hash` — SHA-256 hex digest of `ObjectMapper.writeValueAsBytes(content_json)`,
+  recomputed on every successful write.
+- `version` — starts at `1`, incremented by one on every successful PUT.
 
-Type values are validated both by Jackson (`BlockType` enum) and at the
-database level (`CHECK` constraint).
+Page templates (`page_templates`) follow the same shape: a template stores a
+full page document; instantiating a template copies its `content_json` into
+a brand-new page.
+
+### Conflict detection
+
+`PUT /pages/{pageId}` accepts an optional `baseHash` field. When present,
+the server compares it (string equality) to the page's stored
+`content_hash`. A mismatch returns HTTP 409 with `code: "conflict"` and the
+DB row is left unchanged. When `baseHash` is omitted, the update is
+applied unconditionally.
 
 ## Endpoints
 
@@ -117,14 +127,8 @@ DELETE /notebooks/{notebookId}
 GET    /notebooks/{notebookId}/pages
 POST   /notebooks/{notebookId}/pages
 GET    /pages/{pageId}
-PATCH  /pages/{pageId}
+PUT    /pages/{pageId}
 DELETE /pages/{pageId}
-
-GET    /pages/{pageId}/blocks
-POST   /pages/{pageId}/blocks
-PATCH  /blocks/{blockId}
-DELETE /blocks/{blockId}
-POST   /pages/{pageId}/blocks/reorder
 
 GET    /templates
 POST   /templates

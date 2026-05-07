@@ -15,6 +15,11 @@ import org.hibernate.type.SqlTypes;
 
 import java.util.UUID;
 
+/**
+ * A reusable page document. {@code contentJson} is the full page document
+ * that {@link com.cozy.notebooks.service.PageTemplateService#createPage}
+ * copies verbatim into a fresh page row on instantiation.
+ */
 @Entity
 @Table(name = "page_templates")
 @Getter
@@ -34,19 +39,18 @@ public class PageTemplateEntity extends BaseEntity {
     @Column(name = "name", nullable = false)
     private String name;
 
-    @Column(name = "description")
+    @Column(name = "description", columnDefinition = "text")
     private String description;
 
     @Column(name = "icon")
     private String icon;
 
-    /**
-     * Array of block descriptors:
-     * [{ "type": "...", "content": {...}, "settings": {...}, "position": N }, ...]
-     */
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "blocks", nullable = false, columnDefinition = "json")
-    private JsonNode blocks;
+    @Column(name = "content_json", nullable = false, columnDefinition = "json")
+    private JsonNode contentJson;
+
+    @Column(name = "content_hash", nullable = false, length = 64)
+    private String contentHash;
 
     @Column(name = "is_built_in", nullable = false)
     private boolean builtIn;

@@ -1,6 +1,7 @@
 package com.cozy.notebooks.api;
 
 import com.cozy.notebooks.exception.BadRequestException;
+import com.cozy.notebooks.exception.ConflictException;
 import com.cozy.notebooks.exception.ForbiddenException;
 import com.cozy.notebooks.exception.NotFoundException;
 import com.cozy.notebooks.exception.UnauthorizedException;
@@ -33,6 +34,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BadRequestException.class)
     public ResponseEntity<ErrorResponse> handleBadRequest(BadRequestException ex, HttpServletRequest req) {
         return build(HttpStatus.BAD_REQUEST, "bad_request", ex.getMessage(), req);
+    }
+
+    @ExceptionHandler(ConflictException.class)
+    public ResponseEntity<ErrorResponse> handleConflict(ConflictException ex, HttpServletRequest req) {
+        return build(HttpStatus.CONFLICT, "conflict", ex.getMessage(), req);
     }
 
     @ExceptionHandler(ForbiddenException.class)

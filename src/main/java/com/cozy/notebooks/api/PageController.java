@@ -10,9 +10,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -48,7 +48,15 @@ public class PageController {
         return pageService.get(pageId);
     }
 
-    @PatchMapping("/pages/{pageId}")
+    /**
+     * Replaces the entire page document. The request body's {@code content}
+     * fully overwrites {@code content_json} on the row; {@code content_hash}
+     * is recomputed and {@code version} is incremented by one.
+     *
+     * <p>If {@code baseHash} is provided and does not match the current
+     * {@code content_hash}, the request is rejected with HTTP 409 Conflict.
+     */
+    @PutMapping("/pages/{pageId}")
     public PageResponse update(@PathVariable UUID pageId,
                                @Valid @RequestBody UpdatePageRequest request) {
         return pageService.update(pageId, request);

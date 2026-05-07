@@ -6,10 +6,12 @@ import com.cozy.notebooks.api.dto.PageDtos.UpdatePageRequest;
 import com.cozy.notebooks.domain.NotebookEntity;
 import com.cozy.notebooks.domain.PageEntity;
 import com.cozy.notebooks.exception.BadRequestException;
+import com.cozy.notebooks.exception.ConflictException;
 import com.cozy.notebooks.exception.NotFoundException;
 import com.cozy.notebooks.repository.PageRepository;
 import com.cozy.notebooks.security.CurrentUserProvider;
 import com.cozy.notebooks.service.mapper.PageMapper;
+import com.fasterxml.jackson.databind.JsonNode;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,6 +19,14 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * Page document operations. The backend persists the entire page as a JSON
+ * document; block structure inside the document is opaque to this service.
+ *
+ * <p>Conflict detection on update uses an explicit {@code baseHash} field
+ * on the request, compared as a string against the stored {@code contentHash}.
+ * If they don't match, {@link ConflictException} is thrown (HTTP 409).
+ */
 @Service
 @Transactional
 public class PageService {
@@ -25,24 +35,27 @@ public class PageService {
     private final PageMapper pageMapper;
     private final NotebookService notebookService;
     private final CurrentUserProvider currentUserProvider;
+    private final PageContentHashService hashService;
 
     public PageService(PageRepository pageRepository,
                        PageMapper pageMapper,
                        NotebookService notebookService,
-                       CurrentUserProvider currentUserProvider) {
+                       CurrentUserProvider currentUserProvider,
+                       PageContentHashService hashService) {
         this.pageRepository = pageRepository;
         this.pageMapper = pageMapper;
         this.notebookService = notebookService;
         this.currentUserProvider = currentUserProvider;
+        this.hashService = hashService;
     }
 
     @Transactional(readOnly = true)
     public List<PageResponse> listForNotebook(UUID notebookId) {
         UUID userId = currentUserProvider.requireId();
-        // Ensures the notebook belongs to the current user; throws 404 otherwise.
+        // Authorization: ensures the notebook belongs to the current user.
         notebookService.loadOwned(notebookId);
         return pageRepository
-                .findByNotebookIdAndUserIdAndDeletedAtIsNullOrderByPositionAscCreatedAtAsc(notebookId, userId)
+                .findByNotebookIdAndUserIdAndDeletedAtIsNullOrderByCreatedAtAsc(notebookId, userId)
                 .stream()
                 .map(pageMapper::toResponse)
                 .toList();
@@ -57,46 +70,45 @@ public class PageService {
         UUID userId = currentUserProvider.requireId();
         NotebookEntity notebook = notebookService.loadOwned(notebookId);
 
-        if (request.parentPageId() != null) {
-            PageEntity parent = loadOwned(request.parentPageId());
-            if (!parent.getNotebookId().equals(notebookId)) {
-                throw new BadRequestException("Parent page must belong to the same notebook");
-            }
-        }
+        JsonNode content = requireContent(request.content());
+        String hash = hashService.hash(content);
 
         PageEntity entity = PageEntity.builder()
                 .id(UUID.randomUUID())
                 .userId(userId)
                 .notebookId(notebook.getId())
-                .parentPageId(request.parentPageId())
                 .title(request.title())
-                .icon(request.icon())
-                .coverUrl(request.coverUrl())
-                .position(request.position() == null ? 0 : request.position())
-                .favorite(Boolean.TRUE.equals(request.favorite()))
+                .contentJson(content)
+                .contentHash(hash)
+                .version(1L)
                 .build();
         return pageMapper.toResponse(pageRepository.save(entity));
+    }
+
+    /**
+     * Internal entry point used by template instantiation. Bypasses the
+     * request DTO's bean-validation but re-uses the same hashing/versioning
+     * pipeline as a normal create.
+     */
+    public PageResponse createFromContent(UUID notebookId, String title, JsonNode content) {
+        return create(notebookId, new CreatePageRequest(title, content));
     }
 
     public PageResponse update(UUID id, UpdatePageRequest request) {
         PageEntity entity = loadOwned(id);
 
-        if (request.parentPageId() != null) {
-            PageEntity parent = loadOwned(request.parentPageId());
-            if (!parent.getNotebookId().equals(entity.getNotebookId())) {
-                throw new BadRequestException("Parent page must belong to the same notebook");
-            }
-            if (parent.getId().equals(entity.getId())) {
-                throw new BadRequestException("Page cannot be its own parent");
-            }
-            entity.setParentPageId(request.parentPageId());
+        if (request.baseHash() != null && !request.baseHash().equals(entity.getContentHash())) {
+            throw new ConflictException("Page content was modified by another update");
         }
 
-        if (request.title() != null) entity.setTitle(request.title());
-        if (request.icon() != null) entity.setIcon(request.icon());
-        if (request.coverUrl() != null) entity.setCoverUrl(request.coverUrl());
-        if (request.position() != null) entity.setPosition(request.position());
-        if (request.favorite() != null) entity.setFavorite(request.favorite());
+        JsonNode content = requireContent(request.content());
+
+        if (request.title() != null) {
+            entity.setTitle(request.title());
+        }
+        entity.setContentJson(content);
+        entity.setContentHash(hashService.hash(content));
+        entity.setVersion(entity.getVersion() + 1);
 
         return pageMapper.toResponse(pageRepository.save(entity));
     }
@@ -111,5 +123,12 @@ public class PageService {
         UUID userId = currentUserProvider.requireId();
         return pageRepository.findByIdAndUserIdAndDeletedAtIsNull(id, userId)
                 .orElseThrow(() -> NotFoundException.of("Page", id));
+    }
+
+    private static JsonNode requireContent(JsonNode content) {
+        if (content == null || content.isNull()) {
+            throw new BadRequestException("content must be provided");
+        }
+        return content;
     }
 }

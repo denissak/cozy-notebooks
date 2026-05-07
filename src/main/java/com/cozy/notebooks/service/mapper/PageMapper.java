@@ -11,12 +11,10 @@ public class PageMapper {
         return new PageDtos.PageResponse(
                 e.getId(),
                 e.getNotebookId(),
-                e.getParentPageId(),
                 e.getTitle(),
-                e.getIcon(),
-                e.getCoverUrl(),
-                e.getPosition(),
-                e.isFavorite(),
+                e.getContentJson(),
+                e.getContentHash(),
+                e.getVersion(),
                 e.getCreatedAt(),
                 e.getUpdatedAt()
         );

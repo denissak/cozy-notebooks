@@ -1,12 +1,17 @@
 -- Initial schema for cozy-notebooks (MySQL 8.4 / HeatWave compatible).
+--
+-- Architecture: pages own the entire page document as a JSON column. There is
+-- no separate `blocks` table — block structure lives inside pages.content_json
+-- and is owned/validated by the frontend. The backend treats content as opaque.
+--
 -- Conventions:
 --   - UUIDs are stored as CHAR(36).
 --   - Timestamps are TIMESTAMP(6) (microsecond precision, UTC at the connection layer).
 --   - JSON columns use the native JSON type.
 --   - Soft delete is implemented via the deleted_at column. We use composite
 --     indexes (..., deleted_at, ...) since MySQL does not support partial indexes.
---   - CHECK constraints are used for typed string columns (block type,
---     entity type, operation, platform).
+--   - content_hash is SHA-256(ObjectMapper.writeValueAsBytes(content_json)),
+--     stored as a 64-char lowercase hex string.
 
 -- ============================================================
 -- USERS
@@ -44,63 +49,35 @@ CREATE TABLE notebooks (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- ============================================================
--- PAGES (metadata only, no content JSON)
+-- PAGES (full document storage)
+--
+-- content_json holds the whole page document, including the internal blocks
+-- array. The backend does not interpret its shape.
+-- content_hash and version enable optimistic-concurrency conflict detection.
 -- ============================================================
 CREATE TABLE pages (
-    id             CHAR(36)     NOT NULL,
-    user_id        CHAR(36)     NOT NULL,
-    notebook_id    CHAR(36)     NOT NULL,
-    parent_page_id CHAR(36)     NULL,
-    title          VARCHAR(255) NOT NULL,
-    icon           VARCHAR(64),
-    cover_url      VARCHAR(1024),
-    position       INT          NOT NULL DEFAULT 0,
-    is_favorite    TINYINT(1)   NOT NULL DEFAULT 0,
-    created_at     TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-    updated_at     TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-    deleted_at     TIMESTAMP(6) NULL,
+    id           CHAR(36)     NOT NULL,
+    user_id      CHAR(36)     NOT NULL,
+    notebook_id  CHAR(36)     NOT NULL,
+    title        VARCHAR(255) NOT NULL,
+    content_json JSON         NOT NULL,
+    content_hash CHAR(64)     NOT NULL,
+    version      BIGINT       NOT NULL DEFAULT 1,
+    created_at   TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at   TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    deleted_at   TIMESTAMP(6) NULL,
     PRIMARY KEY (id),
-    KEY ix_pages_notebook_deleted_position (notebook_id, deleted_at, position),
+    KEY ix_pages_notebook_deleted (notebook_id, deleted_at),
     KEY ix_pages_user_deleted (user_id, deleted_at),
-    KEY ix_pages_parent (parent_page_id),
-    CONSTRAINT fk_pages_user     FOREIGN KEY (user_id)        REFERENCES users(id)     ON DELETE CASCADE,
-    CONSTRAINT fk_pages_notebook FOREIGN KEY (notebook_id)    REFERENCES notebooks(id) ON DELETE CASCADE,
-    CONSTRAINT fk_pages_parent   FOREIGN KEY (parent_page_id) REFERENCES pages(id)     ON DELETE SET NULL
+    CONSTRAINT fk_pages_user     FOREIGN KEY (user_id)     REFERENCES users(id)     ON DELETE CASCADE,
+    CONSTRAINT fk_pages_notebook FOREIGN KEY (notebook_id) REFERENCES notebooks(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- ============================================================
--- BLOCKS (page content)
--- ============================================================
-CREATE TABLE blocks (
-    id              CHAR(36)     NOT NULL,
-    user_id         CHAR(36)     NOT NULL,
-    notebook_id     CHAR(36)     NOT NULL,
-    page_id         CHAR(36)     NOT NULL,
-    parent_block_id CHAR(36)     NULL,
-    type            VARCHAR(32)  NOT NULL,
-    content         JSON         NOT NULL,
-    settings        JSON         NOT NULL,
-    position        INT          NOT NULL DEFAULT 0,
-    created_at      TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-    updated_at      TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-    deleted_at      TIMESTAMP(6) NULL,
-    PRIMARY KEY (id),
-    KEY ix_blocks_page_deleted_position (page_id, deleted_at, position),
-    KEY ix_blocks_user_deleted (user_id, deleted_at),
-    KEY ix_blocks_parent (parent_block_id),
-    CONSTRAINT fk_blocks_user     FOREIGN KEY (user_id)         REFERENCES users(id)     ON DELETE CASCADE,
-    CONSTRAINT fk_blocks_notebook FOREIGN KEY (notebook_id)     REFERENCES notebooks(id) ON DELETE CASCADE,
-    CONSTRAINT fk_blocks_page     FOREIGN KEY (page_id)         REFERENCES pages(id)     ON DELETE CASCADE,
-    CONSTRAINT fk_blocks_parent   FOREIGN KEY (parent_block_id) REFERENCES blocks(id)    ON DELETE CASCADE,
-    CONSTRAINT ck_blocks_type CHECK (type IN (
-        'paragraph','heading','todo','checklist','quote','callout',
-        'divider','image','file','audio','code','table','date',
-        'mood','habit','rating','spacer'
-    ))
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
--- ============================================================
--- PAGE TEMPLATES
+-- PAGE TEMPLATES (also full document storage)
+--
+-- A template is a reusable page document. Instantiation copies content_json
+-- into a brand-new pages row.
 -- ============================================================
 CREATE TABLE page_templates (
     id           CHAR(36)     NOT NULL,
@@ -108,9 +85,8 @@ CREATE TABLE page_templates (
     name         VARCHAR(255) NOT NULL,
     description  TEXT,
     icon         VARCHAR(64),
-    -- The template body is a normalized list of block descriptors:
-    -- [ { "type": "...", "content": {...}, "settings": {...}, "position": 0 }, ... ]
-    blocks       JSON         NOT NULL,
+    content_json JSON         NOT NULL,
+    content_hash CHAR(64)     NOT NULL,
     is_built_in  TINYINT(1)   NOT NULL DEFAULT 0,
     created_at   TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     updated_at   TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
@@ -188,6 +164,8 @@ CREATE TABLE devices (
 
 -- ============================================================
 -- SYNC_CHANGES (stub for MVP / future sync)
+--
+-- Note: 'block' is no longer a valid entity_type — pages are atomic for sync.
 -- ============================================================
 CREATE TABLE sync_changes (
     id          BIGINT       NOT NULL AUTO_INCREMENT,
@@ -203,7 +181,7 @@ CREATE TABLE sync_changes (
     CONSTRAINT fk_sync_changes_user   FOREIGN KEY (user_id)   REFERENCES users(id)   ON DELETE CASCADE,
     CONSTRAINT fk_sync_changes_device FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE SET NULL,
     CONSTRAINT ck_sync_changes_entity_type CHECK (entity_type IN (
-        'notebook','page','block','template','asset','tag'
+        'notebook','page','template','asset','tag'
     )),
     CONSTRAINT ck_sync_changes_operation CHECK (operation IN (
         'create','update','delete','restore','reorder'

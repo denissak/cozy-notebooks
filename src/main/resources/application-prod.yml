@@ -57,7 +57,10 @@ management:
 
 cozy:
   security:
-    mock-user-enabled: ${COZY_MOCK_USER_ENABLED:false}
+    # Strict: production must never run with the mock-user fallback enabled.
+    # No env-var override on purpose — flipping this requires a code change
+    # and a redeploy, not just an environment tweak.
+    mock-user-enabled: false
 
 logging:
   level:

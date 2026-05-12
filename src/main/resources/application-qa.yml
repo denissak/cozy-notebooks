@@ -1,0 +1,70 @@
+# QA / staging profile.
+#
+# Activated by SPRING_PROFILES_ACTIVE=qa. Intended for the Render Free
+# deployment that points at MySQL HeatWave on OCI. Mirrors the production
+# datasource contract — credentials and JDBC URL come exclusively from
+# environment variables, nothing is hardcoded.
+#
+# Required environment variables (same names as prod):
+#   PORT         server listen port (Render injects this automatically)
+#   DB_URL       e.g. jdbc:mysql://<host>:3306/<db>?useSSL=true&serverTimezone=UTC
+#   DB_USERNAME  database user
+#   DB_PASSWORD  database password
+#
+# Differences from prod:
+#   - cozy.security.mock-user-enabled = true  (temporary, for QA API testing
+#     without a real JWT pipeline).
+#   - Smaller HikariCP pool, tuned for Render Free + HeatWave free shapes.
+
+spring:
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 5
+      minimum-idle: 1
+      connection-timeout: 30000
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: false
+        jdbc.lob.non_contextual_creation: true
+        dialect: org.hibernate.dialect.MySQLDialect
+        timezone.default_storage: NORMALIZE_UTC
+        type.preferred_uuid_jdbc_type: CHAR
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: false
+    locations: classpath:db/migration
+
+server:
+  port: ${PORT:8080}
+  error:
+    include-message: never
+    include-stacktrace: never
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when_authorized
+
+cozy:
+  security:
+    mock-user-enabled: true
+
+logging:
+  level:
+    root: INFO
+    org.springframework.web: INFO
+    org.hibernate.SQL: WARN

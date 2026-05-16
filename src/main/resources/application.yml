@@ -64,6 +64,11 @@ springdoc:
     tags-sorter: alpha
 
 cozy:
+  cors:
+    # Comma-separated browser origins (never use "*"). Override per env, e.g. Render QA:
+    # COZY_CORS_ALLOWED_ORIGINS=https://cozy-notebooks.vercel.app,http://localhost:5173
+    allowed-origins: ${COZY_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}
+
   security:
     # MVP: when true, request is bound to a fixed dev user. Replace with JWT later.
     mock-user-enabled: ${COZY_MOCK_USER_ENABLED:true}

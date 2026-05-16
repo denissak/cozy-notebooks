@@ -49,7 +49,7 @@ public class PageTemplateEntity extends BaseEntity {
     @Column(name = "content_json", nullable = false, columnDefinition = "json")
     private JsonNode contentJson;
 
-    @Column(name = "content_hash", nullable = false, length = 64)
+    @Column(name = "content_hash", nullable = false, length = 64, columnDefinition = "char(64)")
     private String contentHash;
 
     @Column(name = "is_built_in", nullable = false)

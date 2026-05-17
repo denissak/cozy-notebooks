@@ -10,6 +10,9 @@ spring:
         type.preferred_uuid_jdbc_type: CHAR
 
 cozy:
+  cors:
+    # Include production-like Vercel origin for CORS regression tests.
+    allowed-origins: https://cozy-notebooks.vercel.app,http://localhost:5173,http://localhost:3000
   security:
     mock-user-enabled: true
     mock-user-id: 00000000-0000-0000-0000-000000000001

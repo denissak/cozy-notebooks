@@ -60,6 +60,11 @@ management:
       show-details: when_authorized
 
 cozy:
+  # Must be present under qa: a root-level `cozy:` map here replaces the entire
+  # `cozy` document from application.yml; without `cors`, allowed origins were
+  # empty on Render → no Access-Control-Allow-Origin.
+  cors:
+    allowed-origins: ${COZY_CORS_ALLOWED_ORIGINS:https://cozy-notebooks.vercel.app,http://localhost:5173,http://localhost:3000}
   security:
     mock-user-enabled: true
 

@@ -33,7 +33,7 @@ public class RefreshTokenSessionEntity {
     @Column(name = "device_id", length = 36)
     private UUID deviceId;
 
-    @Column(name = "refresh_token_hash", nullable = false, length = 64)
+    @Column(name = "refresh_token_hash", nullable = false, length = 64, columnDefinition = "char(64)")
     private String refreshTokenHash;
 
     @Column(name = "expires_at", nullable = false)

@@ -65,8 +65,14 @@ cozy:
   # empty on Render → no Access-Control-Allow-Origin.
   cors:
     allowed-origins: ${COZY_CORS_ALLOWED_ORIGINS:https://cozy-notebooks.vercel.app,http://localhost:5173,http://localhost:3000}
+  auth:
+    jwt-secret: ${COZY_AUTH_JWT_SECRET:dev-only-change-me}
+    access-token-ttl-minutes: ${COZY_AUTH_ACCESS_TOKEN_TTL_MINUTES:15}
+    refresh-token-ttl-days: ${COZY_AUTH_REFRESH_TOKEN_TTL_DAYS:30}
   security:
-    mock-user-enabled: true
+    # QA defaults allow mock-user auth for fast manual/API checks. Set
+    # COZY_MOCK_USER_ENABLED=false to exercise real JWT + refresh flows against QA.
+    mock-user-enabled: ${COZY_MOCK_USER_ENABLED:true}
 
 logging:
   level:

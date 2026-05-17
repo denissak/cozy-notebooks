@@ -1,6 +1,7 @@
 package com.cozy.notebooks;
 
 import com.cozy.notebooks.config.CorsProperties;
+import com.cozy.notebooks.security.AuthProperties;
 import com.cozy.notebooks.security.SecurityProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -20,7 +21,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
  * default user from the context.
  */
 @SpringBootApplication(exclude = UserDetailsServiceAutoConfiguration.class)
-@EnableConfigurationProperties({CorsProperties.class, SecurityProperties.class})
+@EnableConfigurationProperties({CorsProperties.class, SecurityProperties.class, AuthProperties.class})
 public class CozyNotebooksApplication {
     public static void main(String[] args) {
         SpringApplication.run(CozyNotebooksApplication.class, args);

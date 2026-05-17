@@ -13,6 +13,12 @@ cozy:
   cors:
     # Include production-like Vercel origin for CORS regression tests.
     allowed-origins: https://cozy-notebooks.vercel.app,http://localhost:5173,http://localhost:3000
+
+  auth:
+    jwt-secret: ${COZY_AUTH_JWT_SECRET:test-jwt-secret-change-me-not-for-production-use}
+    access-token-ttl-minutes: ${COZY_AUTH_ACCESS_TOKEN_TTL_MINUTES:60}
+    refresh-token-ttl-days: ${COZY_AUTH_REFRESH_TOKEN_TTL_DAYS:30}
+
   security:
     mock-user-enabled: true
     mock-user-id: 00000000-0000-0000-0000-000000000001

@@ -13,11 +13,12 @@ import java.io.IOException;
 import java.util.List;
 
 /**
- * MVP-only filter that injects a fixed user into the SecurityContext.
- * Only active when {@code cozy.security.mock-user-enabled=true}.
+ * When {@code cozy.security.mock-user-enabled=true}, injects a fixed {@link CurrentUser}
+ * for business routes only. Skips actuator, OpenAPI, public auth endpoints, and OPTIONS so
+ * probes and registration flows never carry an application principal.
  *
- * Replace with a JWT-decoding filter when the auth service ships.
- * The downstream code only depends on {@link CurrentUser} being the principal.
+ * <p>Downstream code reads {@link CurrentUser} from the {@link SecurityContextHolder}; JWT
+ * authentication is handled by {@link JwtAuthenticationFilter} first when a Bearer token is present.
  */
 public class MockAuthenticationFilter extends OncePerRequestFilter {
 
@@ -31,7 +32,9 @@ public class MockAuthenticationFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
-        if (properties.mockUserEnabled() && SecurityContextHolder.getContext().getAuthentication() == null) {
+        if (!AuthenticationFilterBypass.shouldBypassAuthenticationFilters(request)
+                && properties.mockUserEnabled()
+                && SecurityContextHolder.getContext().getAuthentication() == null) {
             CurrentUser user = new CurrentUser(properties.mockUserId(), properties.mockUserEmail());
             AbstractAuthenticationToken token = new MockAuthenticationToken(user);
             token.setAuthenticated(true);

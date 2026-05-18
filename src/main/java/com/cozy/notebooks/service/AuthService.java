@@ -2,6 +2,7 @@ package com.cozy.notebooks.service;
 
 import com.cozy.notebooks.api.dto.AuthDtos.AuthTokensResponse;
 import com.cozy.notebooks.api.dto.AuthDtos.AuthUserResponse;
+import com.cozy.notebooks.api.dto.AuthDtos.GoogleLoginRequest;
 import com.cozy.notebooks.api.dto.AuthDtos.LoginRequest;
 import com.cozy.notebooks.api.dto.AuthDtos.LogoutRequest;
 import com.cozy.notebooks.api.dto.AuthDtos.MeResponse;
@@ -11,6 +12,7 @@ import com.cozy.notebooks.api.dto.AuthDtos.RegisterRequest;
 import com.cozy.notebooks.domain.RefreshTokenSessionEntity;
 import com.cozy.notebooks.domain.UserEntity;
 import com.cozy.notebooks.domain.UserIdentityEntity;
+import com.cozy.notebooks.exception.BadRequestException;
 import com.cozy.notebooks.exception.ConflictException;
 import com.cozy.notebooks.exception.UnauthorizedException;
 import com.cozy.notebooks.repository.RefreshTokenSessionRepository;
@@ -19,6 +21,8 @@ import com.cozy.notebooks.repository.UserRepository;
 import com.cozy.notebooks.security.AuthProperties;
 import com.cozy.notebooks.security.CurrentUser;
 import com.cozy.notebooks.security.CurrentUserProvider;
+import com.cozy.notebooks.service.auth.google.GoogleOAuthTokenVerifier;
+import com.cozy.notebooks.service.auth.google.GoogleSignInClaims;
 import com.cozy.notebooks.service.crypto.Sha256Hex;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -27,12 +31,14 @@ import org.springframework.transaction.annotation.Transactional;
 import java.security.SecureRandom;
 import java.time.OffsetDateTime;
 import java.util.HexFormat;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
 public class AuthService {
 
     public static final String PROVIDER_EMAIL = "email";
+    public static final String PROVIDER_GOOGLE = "google";
 
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
     private static final HexFormat HEX = HexFormat.of();
@@ -45,6 +51,7 @@ public class AuthService {
     private final AuthProperties authProperties;
     private final Sha256Hex sha256Hex;
     private final CurrentUserProvider currentUserProvider;
+    private final GoogleOAuthTokenVerifier googleOAuthTokenVerifier;
 
     public AuthService(UserRepository userRepository,
                        UserIdentityRepository userIdentityRepository,
@@ -53,7 +60,8 @@ public class AuthService {
                        JwtService jwtService,
                        AuthProperties authProperties,
                        Sha256Hex sha256Hex,
-                       CurrentUserProvider currentUserProvider) {
+                       CurrentUserProvider currentUserProvider,
+                       GoogleOAuthTokenVerifier googleOAuthTokenVerifier) {
         this.userRepository = userRepository;
         this.userIdentityRepository = userIdentityRepository;
         this.refreshTokenSessionRepository = refreshTokenSessionRepository;
@@ -62,6 +70,7 @@ public class AuthService {
         this.authProperties = authProperties;
         this.sha256Hex = sha256Hex;
         this.currentUserProvider = currentUserProvider;
+        this.googleOAuthTokenVerifier = googleOAuthTokenVerifier;
     }
 
     @Transactional
@@ -107,6 +116,121 @@ public class AuthService {
         identity.setLastLoginAt(OffsetDateTime.now());
         UserEntity user = userRepository.findByIdAndDeletedAtIsNull(identity.getUserId())
                 .orElseThrow(() -> new UnauthorizedException("Invalid email or password"));
+
+        return issueTokens(user, normalizedEmail, meta);
+    }
+
+    /**
+     * Google Sign-In using a verified ID token. Linking rules:
+     * <ul>
+     *   <li>{@code provider_subject} for Google is always the Google {@code sub}, never email.</li>
+     *   <li>If {@code email_verified=true}, link to an existing email/password identity with the same
+     *       normalized email (same {@code users.id}), or to an orphan {@code users} row with that email.</li>
+     *   <li>If {@code email_verified=false}, never auto-link to an existing email/password account (unsafe).
+     *       If that email is already taken, return {@link ConflictException}. Otherwise create a new user
+     *       with only the Google identity.</li>
+     * </ul>
+     */
+    @Transactional
+    public AuthTokensResponse loginWithGoogle(GoogleLoginRequest request, ClientMeta meta) {
+        validateGoogleAuthConfigured();
+        GoogleSignInClaims claims = googleOAuthTokenVerifier.verify(request.idToken());
+
+        if (claims.email() == null || claims.email().isBlank()) {
+            throw new BadRequestException("Google account email is required");
+        }
+
+        String normalizedEmail = normalizeEmail(claims.email());
+
+        Optional<UserIdentityEntity> existingGoogle = userIdentityRepository
+                .findByProviderAndProviderSubjectAndDeletedAtIsNull(PROVIDER_GOOGLE, claims.subject());
+        if (existingGoogle.isPresent()) {
+            UserIdentityEntity googleIdentity = existingGoogle.get();
+            googleIdentity.setLastLoginAt(OffsetDateTime.now());
+            googleIdentity.setEmail(normalizedEmail);
+            googleIdentity.setEmailVerified(claims.emailVerified());
+            userIdentityRepository.save(googleIdentity);
+
+            UserEntity user = userRepository.findByIdAndDeletedAtIsNull(googleIdentity.getUserId())
+                    .orElseThrow(() -> new UnauthorizedException("Invalid Google ID token"));
+            return issueTokens(user, normalizeEmail(user.getEmail()), meta);
+        }
+
+        if (claims.emailVerified()) {
+            Optional<UserIdentityEntity> emailIdentity = userIdentityRepository
+                    .findByProviderAndProviderSubjectAndDeletedAtIsNull(PROVIDER_EMAIL, normalizedEmail);
+            if (emailIdentity.isPresent()) {
+                return createLinkedGoogleIdentity(emailIdentity.get().getUserId(), claims, normalizedEmail, meta);
+            }
+            Optional<UserEntity> userByEmail = userRepository.findByEmailIgnoreCaseAndDeletedAtIsNull(normalizedEmail);
+            if (userByEmail.isPresent()) {
+                return createLinkedGoogleIdentity(userByEmail.get().getId(), claims, normalizedEmail, meta);
+            }
+            return createNewGoogleUser(claims, normalizedEmail, meta);
+        }
+
+        if (userRepository.findByEmailIgnoreCaseAndDeletedAtIsNull(normalizedEmail).isPresent()
+                || userIdentityRepository.findByProviderAndProviderSubjectAndDeletedAtIsNull(PROVIDER_EMAIL,
+                        normalizedEmail).isPresent()) {
+            throw new ConflictException(
+                    "An account with this email already exists. Verify your Google email or sign in with email and password.");
+        }
+
+        return createNewGoogleUser(claims, normalizedEmail, meta);
+    }
+
+    private void validateGoogleAuthConfigured() {
+        if (!authProperties.googleEnabled()) {
+            throw new BadRequestException("Google sign-in is disabled");
+        }
+        String clientId = authProperties.googleClientId();
+        if (clientId == null || clientId.isBlank()) {
+            throw new BadRequestException("Google sign-in is not configured");
+        }
+    }
+
+    private AuthTokensResponse createLinkedGoogleIdentity(UUID userId,
+                                                          GoogleSignInClaims claims,
+                                                          String normalizedEmail,
+                                                          ClientMeta meta) {
+        UserIdentityEntity googleIdentity = UserIdentityEntity.builder()
+                .id(UUID.randomUUID())
+                .userId(userId)
+                .provider(PROVIDER_GOOGLE)
+                .providerSubject(claims.subject())
+                .email(normalizedEmail)
+                .emailVerified(claims.emailVerified())
+                .passwordHash(null)
+                .build();
+        googleIdentity.setLastLoginAt(OffsetDateTime.now());
+        userIdentityRepository.save(googleIdentity);
+
+        UserEntity user = userRepository.findByIdAndDeletedAtIsNull(userId)
+                .orElseThrow(() -> new UnauthorizedException("Invalid Google ID token"));
+        return issueTokens(user, normalizeEmail(user.getEmail()), meta);
+    }
+
+    private AuthTokensResponse createNewGoogleUser(GoogleSignInClaims claims, String normalizedEmail, ClientMeta meta) {
+        UUID userId = UUID.randomUUID();
+        UserEntity user = UserEntity.builder()
+                .id(userId)
+                .email(normalizedEmail)
+                .displayName(claims.name())
+                .passwordHash(null)
+                .build();
+        userRepository.save(user);
+
+        UserIdentityEntity googleIdentity = UserIdentityEntity.builder()
+                .id(UUID.randomUUID())
+                .userId(userId)
+                .provider(PROVIDER_GOOGLE)
+                .providerSubject(claims.subject())
+                .email(normalizedEmail)
+                .emailVerified(claims.emailVerified())
+                .passwordHash(null)
+                .build();
+        googleIdentity.setLastLoginAt(OffsetDateTime.now());
+        userIdentityRepository.save(googleIdentity);
 
         return issueTokens(user, normalizedEmail, meta);
     }

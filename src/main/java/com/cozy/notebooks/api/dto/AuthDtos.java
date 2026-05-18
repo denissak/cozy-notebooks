@@ -33,6 +33,11 @@ public final class AuthDtos {
     ) {
     }
 
+    public record GoogleLoginRequest(
+            @NotBlank String idToken
+    ) {
+    }
+
     public record AuthUserResponse(
             UUID id,
             String email

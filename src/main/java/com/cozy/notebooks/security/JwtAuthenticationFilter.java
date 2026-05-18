@@ -29,15 +29,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         this.jwtService = jwtService;
     }
 
+    /**
+     * Skip the filter entirely on public routes so {@code Authorization} is never read or validated there.
+     */
+    @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        return AuthenticationFilterBypass.shouldBypassAuthenticationFilters(request);
+    }
+
     @Override
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
-        if (AuthenticationFilterBypass.shouldBypassAuthenticationFilters(request)) {
-            filterChain.doFilter(request, response);
-            return;
-        }
-
         String header = request.getHeader(HttpHeaders.AUTHORIZATION);
         if (header == null || header.length() <= BEARER_PREFIX.length()
                 || !header.regionMatches(true, 0, BEARER_PREFIX, 0, BEARER_PREFIX.length())) {

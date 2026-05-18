@@ -1,6 +1,7 @@
 package com.cozy.notebooks.api;
 
 import com.cozy.notebooks.api.dto.AuthDtos.AuthTokensResponse;
+import com.cozy.notebooks.api.dto.AuthDtos.GoogleLoginRequest;
 import com.cozy.notebooks.api.dto.AuthDtos.LoginRequest;
 import com.cozy.notebooks.api.dto.AuthDtos.LogoutRequest;
 import com.cozy.notebooks.api.dto.AuthDtos.MeResponse;
@@ -38,6 +39,12 @@ public class AuthController {
     @PostMapping("/login")
     public AuthTokensResponse login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest) {
         return authService.loginWithEmail(request, clientMeta(httpRequest));
+    }
+
+    @PostMapping("/oauth/google")
+    public AuthTokensResponse googleLogin(@Valid @RequestBody GoogleLoginRequest request,
+                                          HttpServletRequest httpRequest) {
+        return authService.loginWithGoogle(request, clientMeta(httpRequest));
     }
 
     @PostMapping("/refresh")

@@ -28,12 +28,19 @@ public class MockAuthenticationFilter extends OncePerRequestFilter {
         this.properties = properties;
     }
 
+    /**
+     * Same bypass list as {@link JwtAuthenticationFilter}: never inject mock principal on public routes or OPTIONS.
+     */
+    @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        return AuthenticationFilterBypass.shouldBypassAuthenticationFilters(request);
+    }
+
     @Override
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
-        if (!AuthenticationFilterBypass.shouldBypassAuthenticationFilters(request)
-                && properties.mockUserEnabled()
+        if (properties.mockUserEnabled()
                 && SecurityContextHolder.getContext().getAuthentication() == null) {
             CurrentUser user = new CurrentUser(properties.mockUserId(), properties.mockUserEmail());
             AbstractAuthenticationToken token = new MockAuthenticationToken(user);

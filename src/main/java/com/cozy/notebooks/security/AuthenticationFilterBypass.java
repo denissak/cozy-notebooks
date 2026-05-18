@@ -14,7 +14,7 @@ public final class AuthenticationFilterBypass {
     private static final AntPathMatcher MATCHER = new AntPathMatcher();
 
     /**
-     * Matches {@link jakarta.servlet.http.HttpServletRequest#getServletPath()}.
+     * Matches request paths ({@link #requestPath(HttpServletRequest)}) against Ant patterns.
      */
     private static final List<String> PATH_PATTERNS = List.of(
             "/actuator/health",
@@ -28,7 +28,8 @@ public final class AuthenticationFilterBypass {
             "/api/v1/auth/register",
             "/api/v1/auth/login",
             "/api/v1/auth/refresh",
-            "/api/v1/auth/logout"
+            "/api/v1/auth/logout",
+            "/api/v1/auth/oauth/google"
     );
 
     private AuthenticationFilterBypass() {
@@ -38,15 +39,32 @@ public final class AuthenticationFilterBypass {
         if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
             return true;
         }
-        String path = request.getServletPath();
-        if (path == null || path.isEmpty()) {
-            path = "/";
-        }
+        String path = requestPath(request);
         for (String pattern : PATH_PATTERNS) {
             if (MATCHER.match(pattern, path)) {
                 return true;
             }
         }
         return false;
+    }
+
+    /**
+     * Prefer {@link HttpServletRequest#getServletPath()}; fall back to {@link HttpServletRequest#getRequestURI()}
+     * minus {@link HttpServletRequest#getContextPath()} when the servlet path is empty (e.g. some MockMvc setups).
+     */
+    private static String requestPath(HttpServletRequest request) {
+        String servletPath = request.getServletPath();
+        if (servletPath != null && !servletPath.isEmpty()) {
+            return servletPath;
+        }
+        String uri = request.getRequestURI();
+        if (uri == null || uri.isEmpty()) {
+            return "/";
+        }
+        String contextPath = request.getContextPath();
+        if (contextPath != null && !contextPath.isEmpty() && uri.startsWith(contextPath)) {
+            uri = uri.substring(contextPath.length());
+        }
+        return uri.isEmpty() ? "/" : uri;
     }
 }

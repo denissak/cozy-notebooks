@@ -18,6 +18,8 @@ cozy:
     jwt-secret: ${COZY_AUTH_JWT_SECRET:test-jwt-secret-change-me-not-for-production-use}
     access-token-ttl-minutes: ${COZY_AUTH_ACCESS_TOKEN_TTL_MINUTES:60}
     refresh-token-ttl-days: ${COZY_AUTH_REFRESH_TOKEN_TTL_DAYS:30}
+    google-enabled: true
+    google-client-id: ${COZY_AUTH_GOOGLE_CLIENT_ID:test.apps.googleusercontent.com}
 
   security:
     mock-user-enabled: true

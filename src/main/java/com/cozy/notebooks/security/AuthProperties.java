@@ -6,6 +6,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public record AuthProperties(
         String jwtSecret,
         int accessTokenTtlMinutes,
-        int refreshTokenTtlDays
+        int refreshTokenTtlDays,
+        boolean googleEnabled,
+        String googleClientId
 ) {
 }

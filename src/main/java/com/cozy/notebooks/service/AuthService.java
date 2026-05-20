@@ -83,7 +83,6 @@ public class AuthService {
                 .id(userId)
                 .email(normalizedEmail)
                 .displayName(null)
-                .passwordHash(null)
                 .build();
         userRepository.save(user);
 
@@ -216,7 +215,6 @@ public class AuthService {
                 .id(userId)
                 .email(normalizedEmail)
                 .displayName(claims.name())
-                .passwordHash(null)
                 .build();
         userRepository.save(user);
 

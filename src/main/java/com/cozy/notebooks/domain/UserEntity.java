@@ -30,7 +30,4 @@ public class UserEntity extends BaseEntity {
 
     @Column(name = "display_name")
     private String displayName;
-
-    @Column(name = "password_hash")
-    private String passwordHash;
 }

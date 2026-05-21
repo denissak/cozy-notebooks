@@ -15,6 +15,7 @@ public final class PageTemplateDtos {
 
     public record TemplateResponse(
             UUID id,
+            String hrefCode,
             String name,
             String description,
             String icon,

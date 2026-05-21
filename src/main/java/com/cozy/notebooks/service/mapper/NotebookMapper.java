@@ -10,6 +10,7 @@ public class NotebookMapper {
     public NotebookDtos.NotebookResponse toResponse(NotebookEntity e) {
         return new NotebookDtos.NotebookResponse(
                 e.getId(),
+                e.getHrefCode(),
                 e.getTitle(),
                 e.getDescription(),
                 e.getColor(),

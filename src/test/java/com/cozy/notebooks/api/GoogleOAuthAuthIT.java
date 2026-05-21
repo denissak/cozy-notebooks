@@ -3,7 +3,6 @@ package com.cozy.notebooks.api;
 import com.cozy.notebooks.exception.UnauthorizedException;
 import com.cozy.notebooks.repository.UserIdentityRepository;
 import com.cozy.notebooks.repository.UserRepository;
-import com.cozy.notebooks.service.AuthService;
 import com.cozy.notebooks.service.auth.google.GoogleOAuthTokenVerifier;
 import com.cozy.notebooks.service.auth.google.GoogleSignInClaims;
 import com.cozy.notebooks.support.AbstractRealAuthIntegrationTest;
@@ -192,5 +191,56 @@ class GoogleOAuthAuthIT extends AbstractRealAuthIntegrationTest {
         mockMvc.perform(get("/api/v1/notebooks")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + access))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void googleLogin_persistsAvatarUrl_fromPicture_forNewUser() throws Exception {
+        String sub = "google-pic-" + UUID.randomUUID();
+        String email = "google-pic-" + UUID.randomUUID() + "@example.com";
+        String picture = "https://lh3.googleusercontent.com/a/unit-test-avatar.png";
+        when(googleOAuthTokenVerifier.verify(anyString())).thenReturn(
+                new GoogleSignInClaims(sub, email, true, "Pic User", picture));
+
+        MvcResult res = mockMvc.perform(post("/api/v1/auth/oauth/google")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("idToken", "mock-google"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.user.avatarUrl").value(picture))
+                .andReturn();
+
+        UUID userId = UUID.fromString(objectMapper.readTree(res.getResponse().getContentAsString())
+                .get("user").get("id").asText());
+        assertThat(userRepository.findByIdAndDeletedAtIsNull(userId).orElseThrow().getAvatarUrl()).isEqualTo(picture);
+    }
+
+    @Test
+    void googleLogin_doesNotOverwrite_nonNullAvatarUrl() throws Exception {
+        String sub = "google-keep-avatar-" + UUID.randomUUID();
+        String email = "google-keep-avatar-" + UUID.randomUUID() + "@example.com";
+        String pictureA = "https://lh3.googleusercontent.com/a/picture-a.png";
+        when(googleOAuthTokenVerifier.verify(anyString())).thenReturn(
+                new GoogleSignInClaims(sub, email, true, "Keep Pic", pictureA));
+
+        mockMvc.perform(post("/api/v1/auth/oauth/google")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("idToken", "first-google"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.user.avatarUrl").value(pictureA));
+
+        var userRow = userRepository.findByEmailIgnoreCaseAndDeletedAtIsNull(email.toLowerCase()).orElseThrow();
+        userRow.setAvatarUrl("https://custom.example/preserved-face.png");
+        userRepository.save(userRow);
+
+        String pictureB = "https://lh3.googleusercontent.com/a/picture-b.png";
+        when(googleOAuthTokenVerifier.verify(anyString())).thenReturn(
+                new GoogleSignInClaims(sub, email, true, "Keep Pic", pictureB));
+
+        mockMvc.perform(post("/api/v1/auth/oauth/google")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("idToken", "second-google"))))
+                .andExpect(status().isOk());
+
+        assertThat(userRepository.findByIdAndDeletedAtIsNull(userRow.getId()).orElseThrow().getAvatarUrl())
+                .isEqualTo("https://custom.example/preserved-face.png");
     }
 }

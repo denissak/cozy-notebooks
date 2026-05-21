@@ -12,4 +12,6 @@ public interface NotebookRepository extends JpaRepository<NotebookEntity, UUID> 
     List<NotebookEntity> findByUserIdAndDeletedAtIsNullOrderByPositionAscCreatedAtAsc(UUID userId);
 
     Optional<NotebookEntity> findByIdAndUserIdAndDeletedAtIsNull(UUID id, UUID userId);
+
+    boolean existsByUserIdAndHrefCode(UUID userId, String hrefCode);
 }

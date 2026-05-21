@@ -83,6 +83,7 @@ public class AuthService {
                 .id(userId)
                 .email(normalizedEmail)
                 .displayName(null)
+                .avatarUrl(null)
                 .build();
         userRepository.save(user);
 
@@ -152,6 +153,7 @@ public class AuthService {
 
             UserEntity user = userRepository.findByIdAndDeletedAtIsNull(googleIdentity.getUserId())
                     .orElseThrow(() -> new UnauthorizedException("Invalid Google ID token"));
+            mergeGooglePictureIfAbsent(user, claims);
             return issueTokens(user, normalizeEmail(user.getEmail()), meta);
         }
 
@@ -206,6 +208,7 @@ public class AuthService {
 
         UserEntity user = userRepository.findByIdAndDeletedAtIsNull(userId)
                 .orElseThrow(() -> new UnauthorizedException("Invalid Google ID token"));
+        mergeGooglePictureIfAbsent(user, claims);
         return issueTokens(user, normalizeEmail(user.getEmail()), meta);
     }
 
@@ -215,6 +218,7 @@ public class AuthService {
                 .id(userId)
                 .email(normalizedEmail)
                 .displayName(claims.name())
+                .avatarUrl(trimToNull(claims.picture()))
                 .build();
         userRepository.save(user);
 
@@ -268,8 +272,21 @@ public class AuthService {
 
     @Transactional(readOnly = true)
     public MeResponse getCurrentUserMe() {
-        CurrentUser user = currentUserProvider.require();
-        return new MeResponse(user.id(), user.email());
+        CurrentUser current = currentUserProvider.require();
+        UserEntity user = userRepository.findByIdAndDeletedAtIsNull(current.id())
+                .orElseThrow(() -> new UnauthorizedException("Authentication required"));
+        return new MeResponse(user.getId(), normalizeEmail(user.getEmail()), user.getAvatarUrl());
+    }
+
+    private void mergeGooglePictureIfAbsent(UserEntity user, GoogleSignInClaims claims) {
+        if (claims.picture() == null || claims.picture().isBlank()) {
+            return;
+        }
+        if (user.getAvatarUrl() != null && !user.getAvatarUrl().isBlank()) {
+            return;
+        }
+        user.setAvatarUrl(claims.picture());
+        userRepository.save(user);
     }
 
     private AuthTokensResponse issueTokens(UserEntity user, String normalizedEmail, ClientMeta meta) {
@@ -279,7 +296,7 @@ public class AuthService {
         return new AuthTokensResponse(
                 access,
                 refresh.raw(),
-                new AuthUserResponse(user.getId(), normalizedEmail)
+                new AuthUserResponse(user.getId(), normalizedEmail, user.getAvatarUrl())
         );
     }
 
@@ -327,6 +344,13 @@ public class AuthService {
 
     private static String normalizeEmail(String email) {
         return email.trim().toLowerCase();
+    }
+
+    private static String trimToNull(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value;
     }
 
     private RawRefreshToken newRawRefreshToken() {

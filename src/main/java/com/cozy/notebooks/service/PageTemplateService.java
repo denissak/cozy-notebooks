@@ -12,6 +12,7 @@ import com.cozy.notebooks.repository.PageTemplateRepository;
 import com.cozy.notebooks.security.CurrentUserProvider;
 import com.cozy.notebooks.service.mapper.PageTemplateMapper;
 import com.fasterxml.jackson.databind.JsonNode;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,22 +29,27 @@ import java.util.UUID;
 @Transactional
 public class PageTemplateService {
 
+    private static final int MAX_HREF_CODE_ALLOCATION_ATTEMPTS = 64;
+
     private final PageTemplateRepository templateRepository;
     private final PageTemplateMapper templateMapper;
     private final PageService pageService;
     private final CurrentUserProvider currentUserProvider;
     private final PageContentHashService hashService;
+    private final HrefCodeGenerator hrefCodeGenerator;
 
     public PageTemplateService(PageTemplateRepository templateRepository,
                                PageTemplateMapper templateMapper,
                                PageService pageService,
                                CurrentUserProvider currentUserProvider,
-                               PageContentHashService hashService) {
+                               PageContentHashService hashService,
+                               HrefCodeGenerator hrefCodeGenerator) {
         this.templateRepository = templateRepository;
         this.templateMapper = templateMapper;
         this.pageService = pageService;
         this.currentUserProvider = currentUserProvider;
         this.hashService = hashService;
+        this.hrefCodeGenerator = hrefCodeGenerator;
     }
 
     @Transactional(readOnly = true)
@@ -64,17 +70,30 @@ public class PageTemplateService {
         UUID userId = currentUserProvider.requireId();
         JsonNode content = requireContent(request.content());
 
-        PageTemplateEntity entity = PageTemplateEntity.builder()
-                .id(UUID.randomUUID())
-                .userId(userId)
-                .name(request.name())
-                .description(request.description())
-                .icon(request.icon())
-                .contentJson(content)
-                .contentHash(hashService.hash(content))
-                .builtIn(false)
-                .build();
-        return templateMapper.toResponse(templateRepository.save(entity));
+        for (int attempt = 0; attempt < MAX_HREF_CODE_ALLOCATION_ATTEMPTS; attempt++) {
+            String hrefCode = hrefCodeGenerator.generate();
+            if (templateRepository.existsByUserIdAndHrefCode(userId, hrefCode)) {
+                continue;
+            }
+            try {
+                PageTemplateEntity entity = PageTemplateEntity.builder()
+                        .id(UUID.randomUUID())
+                        .userId(userId)
+                        .hrefCode(hrefCode)
+                        .name(request.name())
+                        .description(request.description())
+                        .icon(request.icon())
+                        .contentJson(content)
+                        .contentHash(hashService.hash(content))
+                        .builtIn(false)
+                        .build();
+                templateRepository.saveAndFlush(entity);
+                return templateMapper.toResponse(entity);
+            } catch (DataIntegrityViolationException ignored) {
+                // Rare unique (user_id, href_code) race; retry with a new candidate.
+            }
+        }
+        throw new IllegalStateException("Could not allocate a unique template href_code");
     }
 
     public TemplateResponse update(UUID id, UpdateTemplateRequest request) {

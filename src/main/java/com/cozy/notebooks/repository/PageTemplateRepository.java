@@ -12,4 +12,6 @@ public interface PageTemplateRepository extends JpaRepository<PageTemplateEntity
     List<PageTemplateEntity> findByUserIdAndDeletedAtIsNullOrderByCreatedAtAsc(UUID userId);
 
     Optional<PageTemplateEntity> findByIdAndUserIdAndDeletedAtIsNull(UUID id, UUID userId);
+
+    boolean existsByUserIdAndHrefCode(UUID userId, String hrefCode);
 }

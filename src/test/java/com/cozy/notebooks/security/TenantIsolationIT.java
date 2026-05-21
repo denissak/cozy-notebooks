@@ -44,6 +44,7 @@ class TenantIsolationIT extends AbstractIntegrationTest {
         NotebookEntity foreign = NotebookEntity.builder()
                 .id(UUID.randomUUID())
                 .userId(other.getId())
+                .hrefCode("zzzzzzzzzzzzzzzz")
                 .title("Top secret")
                 .position(0)
                 .build();

@@ -30,4 +30,7 @@ public class UserEntity extends BaseEntity {
 
     @Column(name = "display_name")
     private String displayName;
+
+    @Column(name = "avatar_url", length = 1024)
+    private String avatarUrl;
 }

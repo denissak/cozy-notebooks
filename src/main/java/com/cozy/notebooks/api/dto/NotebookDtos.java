@@ -13,6 +13,7 @@ public final class NotebookDtos {
 
     public record NotebookResponse(
             UUID id,
+            String hrefCode,
             String title,
             String description,
             String color,

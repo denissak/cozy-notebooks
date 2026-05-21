@@ -14,6 +14,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -134,7 +135,48 @@ class AuthFlowIT extends AbstractRealAuthIntegrationTest {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + tokens.accessToken()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(tokens.userId().toString()))
-                .andExpect(jsonPath("$.email").value(tokens.userEmail()));
+                .andExpect(jsonPath("$.email").value(tokens.userEmail()))
+                .andExpect(jsonPath("$.avatarUrl").exists())
+                .andExpect(jsonPath("$.avatarUrl").value(nullValue()));
+    }
+
+    @Test
+    void register_login_me_responsesExposeAvatarUrl() throws Exception {
+        String email = randomEmail();
+        String password = "Password123!";
+
+        JsonNode registration = parseJson(mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "email", email,
+                                "password", password
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.user.avatarUrl").exists())
+                .andExpect(jsonPath("$.user.avatarUrl").value(nullValue()))
+                .andReturn());
+        assertThat(registration.has("accessToken")).isTrue();
+
+        JsonNode loggedIn = parseJson(mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "email", email,
+                                "password", password
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.user.avatarUrl").exists())
+                .andExpect(jsonPath("$.user.avatarUrl").value(nullValue()))
+                .andReturn());
+
+        assertThat(loggedIn.has("accessToken")).isTrue();
+
+        JsonNode me = parseJson(mockMvc.perform(get("/api/v1/auth/me")
+                                .header(HttpHeaders.AUTHORIZATION, "Bearer " + loggedIn.get("accessToken").asText()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.avatarUrl").exists())
+                .andExpect(jsonPath("$.avatarUrl").value(nullValue()))
+                .andReturn());
+        assertThat(me.get("email").asText()).isEqualToIgnoringCase(email);
     }
 
     @Test
@@ -150,6 +192,10 @@ class AuthFlowIT extends AbstractRealAuthIntegrationTest {
         mockMvc.perform(get("/api/v1/notebooks")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + tokens.accessToken()))
                 .andExpect(status().isOk());
+    }
+
+    private JsonNode parseJson(MvcResult result) throws Exception {
+        return objectMapper.readTree(result.getResponse().getContentAsString());
     }
 
     private Tokens register(String email, String password) throws Exception {

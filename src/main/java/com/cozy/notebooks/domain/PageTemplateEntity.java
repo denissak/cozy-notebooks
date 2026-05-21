@@ -36,6 +36,9 @@ public class PageTemplateEntity extends BaseEntity {
     @Column(name = "user_id", nullable = false, length = 36)
     private UUID userId;
 
+    @Column(name = "href_code", nullable = false, length = 18, columnDefinition = "varchar(18)")
+    private String hrefCode;
+
     @Column(name = "name", nullable = false)
     private String name;
 

@@ -1,5 +1,6 @@
 package com.cozy.notebooks.api;
 
+import com.cozy.notebooks.service.HrefCodeGenerator;
 import com.cozy.notebooks.support.AbstractIntegrationTest;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -9,8 +10,10 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -57,11 +60,14 @@ class TemplateControllerIT extends AbstractIntegrationTest {
                                 "content", templateContent))))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.name").value("Daily journal"))
+                .andExpect(jsonPath("$.hrefCode").exists())
+                .andExpect(jsonPath("$.hrefCode").isString())
                 .andExpect(jsonPath("$.contentHash").isString())
                 .andExpect(jsonPath("$.content.blocks.length()").value(3))
                 .andReturn();
-        UUID templateId = UUID.fromString(objectMapper.readTree(tres.getResponse()
-                .getContentAsString()).get("id").asText());
+        JsonNode templateJson = objectMapper.readTree(tres.getResponse().getContentAsString());
+        assertTemplateHref(templateJson.get("hrefCode").asText());
+        UUID templateId = UUID.fromString(templateJson.get("id").asText());
 
         MvcResult pageRes = mockMvc.perform(post("/api/v1/templates/{tid}/create-page", templateId)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -106,5 +112,33 @@ class TemplateControllerIT extends AbstractIntegrationTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("validation_failed"))
                 .andExpect(jsonPath("$.errors[0].field").value("content"));
+    }
+
+    @Test
+    void create_multiple_templates_generatesDistinctHrefCodes() throws Exception {
+        Map<String, Object> templateContent = Map.of("blocks", List.of());
+        Set<String> seen = new HashSet<>();
+        for (int i = 0; i < 12; i++) {
+            JsonNode json = objectMapper.readTree(mockMvc.perform(post("/api/v1/templates")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(Map.of(
+                                    "name", "Tpl " + i,
+                                    "content", templateContent))))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.hrefCode").exists())
+                    .andReturn().getResponse().getContentAsString());
+            String hrefCode = json.get("hrefCode").asText();
+            assertTemplateHref(hrefCode);
+            assertThat(seen).doesNotContain(hrefCode);
+            seen.add(hrefCode);
+        }
+        assertThat(seen).hasSize(12);
+    }
+
+    private static void assertTemplateHref(String hrefCode) {
+        assertThat(hrefCode).hasSize(18);
+        for (char ch : hrefCode.toCharArray()) {
+            assertThat(HrefCodeGenerator.ALPHABET.indexOf(ch)).isGreaterThanOrEqualTo(0);
+        }
     }
 }

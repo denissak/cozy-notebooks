@@ -10,6 +10,7 @@ public class PageTemplateMapper {
     public PageTemplateDtos.TemplateResponse toResponse(PageTemplateEntity e) {
         return new PageTemplateDtos.TemplateResponse(
                 e.getId(),
+                e.getHrefCode(),
                 e.getName(),
                 e.getDescription(),
                 e.getIcon(),

@@ -8,6 +8,7 @@ import com.cozy.notebooks.exception.NotFoundException;
 import com.cozy.notebooks.repository.NotebookRepository;
 import com.cozy.notebooks.security.CurrentUserProvider;
 import com.cozy.notebooks.service.mapper.NotebookMapper;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,16 +20,21 @@ import java.util.UUID;
 @Transactional
 public class NotebookService {
 
+    private static final int MAX_HREF_CODE_ALLOCATION_ATTEMPTS = 64;
+
     private final NotebookRepository notebookRepository;
     private final NotebookMapper notebookMapper;
     private final CurrentUserProvider currentUserProvider;
+    private final HrefCodeGenerator hrefCodeGenerator;
 
     public NotebookService(NotebookRepository notebookRepository,
                            NotebookMapper notebookMapper,
-                           CurrentUserProvider currentUserProvider) {
+                           CurrentUserProvider currentUserProvider,
+                           HrefCodeGenerator hrefCodeGenerator) {
         this.notebookRepository = notebookRepository;
         this.notebookMapper = notebookMapper;
         this.currentUserProvider = currentUserProvider;
+        this.hrefCodeGenerator = hrefCodeGenerator;
     }
 
     @Transactional(readOnly = true)
@@ -48,16 +54,29 @@ public class NotebookService {
 
     public NotebookResponse create(CreateNotebookRequest request) {
         UUID userId = currentUserProvider.requireId();
-        NotebookEntity entity = NotebookEntity.builder()
-                .id(UUID.randomUUID())
-                .userId(userId)
-                .title(request.title())
-                .description(request.description())
-                .color(request.color())
-                .icon(request.icon())
-                .position(request.position() == null ? 0 : request.position())
-                .build();
-        return notebookMapper.toResponse(notebookRepository.save(entity));
+        for (int attempt = 0; attempt < MAX_HREF_CODE_ALLOCATION_ATTEMPTS; attempt++) {
+            String hrefCode = hrefCodeGenerator.generate();
+            if (notebookRepository.existsByUserIdAndHrefCode(userId, hrefCode)) {
+                continue;
+            }
+            try {
+                NotebookEntity entity = NotebookEntity.builder()
+                        .id(UUID.randomUUID())
+                        .userId(userId)
+                        .hrefCode(hrefCode)
+                        .title(request.title())
+                        .description(request.description())
+                        .color(request.color())
+                        .icon(request.icon())
+                        .position(request.position() == null ? 0 : request.position())
+                        .build();
+                notebookRepository.saveAndFlush(entity);
+                return notebookMapper.toResponse(entity);
+            } catch (DataIntegrityViolationException ignored) {
+                // Rare unique (user_id, href_code) race; retry with a new candidate.
+            }
+        }
+        throw new IllegalStateException("Could not allocate a unique notebook href_code");
     }
 
     public NotebookResponse update(UUID id, UpdateNotebookRequest request) {

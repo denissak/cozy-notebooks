@@ -1,5 +1,6 @@
 package com.cozy.notebooks.api.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
@@ -38,9 +39,11 @@ public final class AuthDtos {
     ) {
     }
 
+    @JsonInclude(JsonInclude.Include.ALWAYS)
     public record AuthUserResponse(
             UUID id,
-            String email
+            String email,
+            String avatarUrl
     ) {
     }
 
@@ -57,9 +60,11 @@ public final class AuthDtos {
     ) {
     }
 
+    @JsonInclude(JsonInclude.Include.ALWAYS)
     public record MeResponse(
             UUID id,
-            String email
+            String email,
+            String avatarUrl
     ) {
     }
 }

@@ -232,6 +232,8 @@ Test coverage includes:
 
 ### Default mode: Testcontainers (CI and Linux/macOS contributors)
 
+**Simply running `./gradlew test` assumes Docker Desktop (or compatible Docker daemon) is running** so Testcontainers can start MySQL 8.4. If Docker is not available, switch to **local-MySQL mode** below.
+
 If `USE_LOCAL_MYSQL` is not set, `AbstractIntegrationTest` boots a fresh
 `mysql:8.4` Testcontainer per JVM. This is what runs in CI and is the
 recommended setup whenever Testcontainers can talk to your local Docker
@@ -262,24 +264,32 @@ Workflow:
 # 1. Start MySQL from the repo's docker-compose (once)
 docker compose up -d mysql
 
-# 2. Run tests in local mode
+# 2a. Shell env (POSIX / Git Bash)
 USE_LOCAL_MYSQL=true ./gradlew clean test
+
+# 2b. Gradle property — sets USE_LOCAL_MYSQL on forked JVMs (helps on CMD/PowerShell)
+./gradlew clean test -Pcozy.test.useLocalMysql=true
+
+# 2c. Optional: Gradle task pulls MySQL up when local mode or -P flag is enabled
+USE_LOCAL_MYSQL=true ./gradlew startLocalMysql clean test
 ```
 
 To stop / reset the DB later: `docker compose down -v`.
+
+`FlywayV5HrefCodeBackfillIT` also honors local mode: it creates logical database `cozy_notebooks_href_migration` on `localhost` (via `CREATE DATABASE`), using **`root` / root password `root`** — matching `docker-compose.yml` — so it does not collide with Flyway migrations on `cozy_notebooks` used by `AbstractIntegrationTest`.
 
 #### IntelliJ "Run Backend Tests" configuration
 
 | Setting | Value |
 |---|---|
 | Gradle task | `clean test` |
-| Environment variables | `USE_LOCAL_MYSQL=true;TESTCONTAINERS_RYUK_DISABLED=true` |
+| Gradle arguments OR env | `-Pcozy.test.useLocalMysql=true` **or** `USE_LOCAL_MYSQL=true` (+ optional `TESTCONTAINERS_RYUK_DISABLED=true`) |
 
 Notes:
 
-- This is **per-developer machine config**, not project config. Do not
-  commit Docker host overrides or any machine-specific Testcontainers
-  configuration into the repository (`build.gradle.kts`, `src/`, etc.).
+- Machine-specific overrides (Ryuk tweaks, exotic `DOCKER_HOST`, etc.)
+  belong in IntelliJ Gradle run configs — not git.
+- The repo **`build.gradle.kts`** intentionally forwards `-Pcozy.test.useLocalMysql=true` → `USE_LOCAL_MYSQL=true` only for Gradle `test`; that is documented here and avoids fragile manual exports on Windows.
 - The credentials/URL above match the `mysql` service in this repo's
   `docker-compose.yml`. If you point at a different MySQL, adjust the
   service password accordingly.

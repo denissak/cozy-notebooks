@@ -14,7 +14,6 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -131,13 +130,13 @@ class AuthFlowIT extends AbstractRealAuthIntegrationTest {
     void getMe_withBearerJwt_returnsCurrentUser() throws Exception {
         Tokens tokens = register(randomEmail(), "Password123!");
 
-        mockMvc.perform(get("/api/v1/auth/me")
+        JsonNode me = parseJson(mockMvc.perform(get("/api/v1/auth/me")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + tokens.accessToken()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(tokens.userId().toString()))
                 .andExpect(jsonPath("$.email").value(tokens.userEmail()))
-                .andExpect(jsonPath("$.avatarUrl").exists())
-                .andExpect(jsonPath("$.avatarUrl").value(nullValue()));
+                .andReturn());
+        assertExplicitJsonNullField(me, "avatarUrl");
     }
 
     @Test
@@ -152,10 +151,9 @@ class AuthFlowIT extends AbstractRealAuthIntegrationTest {
                                 "password", password
                         ))))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.user.avatarUrl").exists())
-                .andExpect(jsonPath("$.user.avatarUrl").value(nullValue()))
                 .andReturn());
         assertThat(registration.has("accessToken")).isTrue();
+        assertExplicitJsonNullField(registration.path("user"), "avatarUrl");
 
         JsonNode loggedIn = parseJson(mockMvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -164,19 +162,17 @@ class AuthFlowIT extends AbstractRealAuthIntegrationTest {
                                 "password", password
                         ))))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.user.avatarUrl").exists())
-                .andExpect(jsonPath("$.user.avatarUrl").value(nullValue()))
                 .andReturn());
 
         assertThat(loggedIn.has("accessToken")).isTrue();
+        assertExplicitJsonNullField(loggedIn.path("user"), "avatarUrl");
 
         JsonNode me = parseJson(mockMvc.perform(get("/api/v1/auth/me")
                                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + loggedIn.get("accessToken").asText()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.avatarUrl").exists())
-                .andExpect(jsonPath("$.avatarUrl").value(nullValue()))
                 .andReturn());
         assertThat(me.get("email").asText()).isEqualToIgnoringCase(email);
+        assertExplicitJsonNullField(me, "avatarUrl");
     }
 
     @Test
@@ -196,6 +192,12 @@ class AuthFlowIT extends AbstractRealAuthIntegrationTest {
 
     private JsonNode parseJson(MvcResult result) throws Exception {
         return objectMapper.readTree(result.getResponse().getContentAsString());
+    }
+
+    /** Spring's JsonPath {@code exists()} treats explicit JSON {@code null} as "no value" — verify the key is present instead. */
+    private static void assertExplicitJsonNullField(JsonNode container, String field) {
+        assertThat(container.has(field)).as("JSON must expose key \"%s\"", field).isTrue();
+        assertThat(container.get(field).isNull()).as("Expected \"%s\" to be JSON null", field).isTrue();
     }
 
     private Tokens register(String email, String password) throws Exception {

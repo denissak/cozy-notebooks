@@ -11,7 +11,8 @@ import org.testcontainers.containers.MySQLContainer;
  * Base class for full-stack integration tests.
  *
  * <p>Two modes — selected at JVM startup via the {@code USE_LOCAL_MYSQL}
- * environment variable:
+ * environment variable (or Gradle {@code -Pcozy.test.useLocalMysql=true},
+ * see {@code build.gradle.kts}):
  *
  * <ul>
  *   <li><b>Default ({@code USE_LOCAL_MYSQL} unset / not "true")</b> —
@@ -35,19 +36,31 @@ import org.testcontainers.containers.MySQLContainer;
 @ActiveProfiles("test")
 public abstract class AbstractIntegrationTest {
 
-    private static final boolean USE_LOCAL_MYSQL =
-            "true".equalsIgnoreCase(System.getenv("USE_LOCAL_MYSQL"));
+    private static final boolean USE_LOCAL_MYSQL = MySqlIntegrationSupport.useLocalMysql();
 
     private static MySQLContainer<?> mysql;
 
     static {
         if (!USE_LOCAL_MYSQL) {
-            mysql = new MySQLContainer<>("mysql:8.4")
-                    .withDatabaseName("cozy_notebooks")
-                    .withUsername("cozy")
-                    .withPassword("cozy");
-
-            mysql.start();
+            try {
+                mysql = new MySQLContainer<>("mysql:8.4")
+                        .withDatabaseName("cozy_notebooks")
+                        .withUsername("cozy")
+                        .withPassword("cozy");
+                mysql.start();
+            } catch (Throwable t) {
+                throw new IllegalStateException(
+                        """
+                                Integration tests could not start MySQL via Testcontainers (Docker not running or not reachable?).
+                                Fix one of:
+                                1. Start Docker Desktop and re-run ./gradlew test
+                                2. Or start MySQL on localhost:3306 (e.g. docker compose up -d mysql) then run:
+                                   USE_LOCAL_MYSQL=true ./gradlew clean test
+                                   or: ./gradlew clean test -Pcozy.test.useLocalMysql=true
+                                See README: "Local-MySQL mode for Windows / IntelliJ users"."""
+                                .stripIndent(),
+                        t);
+            }
         }
     }
 

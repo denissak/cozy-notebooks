@@ -65,6 +65,16 @@ tasks.withType<Test> {
     testLogging {
         events("passed", "skipped", "failed")
     }
+    /*
+     * Mirrors README "Local-MySQL mode". Pass -Pcozy.test.useLocalMysql=true so Gradle
+     * sets USE_LOCAL_MYSQL on the forked JVM (handier than exporting in Git Bash/CMD).
+     * Still start MySQL first: docker compose up -d mysql
+     */
+    val localMysqlGradleProp =
+        project.findProperty("cozy.test.useLocalMysql")?.toString()?.equals("true", ignoreCase = true) == true
+    if (localMysqlGradleProp) {
+        environment("USE_LOCAL_MYSQL", "true")
+    }
 }
 
 tasks.withType<JavaCompile> {
@@ -76,7 +86,8 @@ tasks.register<Exec>("startLocalMysql") {
     description = "Starts local MySQL service for local integration tests."
 
     onlyIf {
-        System.getenv("USE_LOCAL_MYSQL") == "true"
+        System.getenv("USE_LOCAL_MYSQL")?.equals("true", ignoreCase = true) == true
+                || project.findProperty("cozy.test.useLocalMysql")?.toString()?.equals("true", ignoreCase = true) == true
     }
 
     val isWindows = System.getProperty("os.name").lowercase().contains("windows")

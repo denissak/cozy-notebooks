@@ -1,5 +1,7 @@
 package com.cozy.notebooks.api;
 
+import com.cozy.notebooks.domain.UserPlan;
+import com.cozy.notebooks.repository.UserRepository;
 import com.cozy.notebooks.support.AbstractRealAuthIntegrationTest;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -27,6 +29,9 @@ class AuthFlowIT extends AbstractRealAuthIntegrationTest {
     @Autowired
     ObjectMapper objectMapper;
 
+    @Autowired
+    UserRepository userRepository;
+
     @Test
     void register_emailUser_success() throws Exception {
         String email = randomEmail();
@@ -36,6 +41,11 @@ class AuthFlowIT extends AbstractRealAuthIntegrationTest {
         assertThat(tokens.refreshToken()).isNotBlank();
         assertThat(tokens.userId()).isNotNull();
         assertThat(tokens.userEmail()).isEqualToIgnoringCase(email);
+        assertThat(userRepository.findByIdAndDeletedAtIsNull(tokens.userId()))
+                .isPresent()
+                .get()
+                .extracting(u -> u.getPlanCode())
+                .isEqualTo(UserPlan.FREE.code());
     }
 
     @Test
@@ -135,6 +145,7 @@ class AuthFlowIT extends AbstractRealAuthIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(tokens.userId().toString()))
                 .andExpect(jsonPath("$.email").value(tokens.userEmail()))
+                .andExpect(jsonPath("$.planCode").value("free"))
                 .andReturn());
         assertExplicitJsonNullField(me, "avatarUrl");
     }

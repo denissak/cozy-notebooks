@@ -1,5 +1,9 @@
 package com.cozy.notebooks.api;
 
+import com.cozy.notebooks.domain.UserEntity;
+import com.cozy.notebooks.domain.UserPlan;
+import com.cozy.notebooks.repository.UserRepository;
+import com.cozy.notebooks.security.SecurityProperties;
 import com.cozy.notebooks.service.HrefCodeGenerator;
 import com.cozy.notebooks.support.AbstractIntegrationTest;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -31,6 +35,12 @@ class NotebookControllerIT extends AbstractIntegrationTest {
 
     @Autowired
     ObjectMapper objectMapper;
+
+    @Autowired
+    UserRepository userRepository;
+
+    @Autowired
+    SecurityProperties securityProperties;
 
     @Test
     void create_get_update_delete_notebook() throws Exception {
@@ -108,6 +118,7 @@ class NotebookControllerIT extends AbstractIntegrationTest {
 
     @Test
     void create_multiple_notebooks_generatesDistinctHrefCodes() throws Exception {
+        setMockUserPlan(UserPlan.PRO.code());
         Set<String> hrefs = new HashSet<>();
         for (int i = 0; i < 12; i++) {
             JsonNode json = objectMapper.readTree(mockMvc.perform(post("/api/v1/notebooks")
@@ -122,6 +133,13 @@ class NotebookControllerIT extends AbstractIntegrationTest {
             hrefs.add(hrefCode);
         }
         assertThat(hrefs).hasSize(12);
+    }
+
+    private void setMockUserPlan(String planCode) {
+        UserEntity mockUser = userRepository.findByIdAndDeletedAtIsNull(securityProperties.mockUserId())
+                .orElseThrow();
+        mockUser.setPlanCode(planCode);
+        userRepository.saveAndFlush(mockUser);
     }
 
     private static void assertHrefCodeShape(String hrefCode) {

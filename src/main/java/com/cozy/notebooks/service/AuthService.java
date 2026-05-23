@@ -12,6 +12,7 @@ import com.cozy.notebooks.api.dto.AuthDtos.RegisterRequest;
 import com.cozy.notebooks.domain.RefreshTokenSessionEntity;
 import com.cozy.notebooks.domain.UserEntity;
 import com.cozy.notebooks.domain.UserIdentityEntity;
+import com.cozy.notebooks.domain.UserPlan;
 import com.cozy.notebooks.exception.BadRequestException;
 import com.cozy.notebooks.exception.ConflictException;
 import com.cozy.notebooks.exception.UnauthorizedException;
@@ -84,6 +85,7 @@ public class AuthService {
                 .email(normalizedEmail)
                 .displayName(null)
                 .avatarUrl(null)
+                .planCode(UserPlan.FREE.code())
                 .build();
         userRepository.save(user);
 
@@ -219,6 +221,7 @@ public class AuthService {
                 .email(normalizedEmail)
                 .displayName(claims.name())
                 .avatarUrl(trimToNull(claims.picture()))
+                .planCode(UserPlan.FREE.code())
                 .build();
         userRepository.save(user);
 
@@ -275,7 +278,11 @@ public class AuthService {
         CurrentUser current = currentUserProvider.require();
         UserEntity user = userRepository.findByIdAndDeletedAtIsNull(current.id())
                 .orElseThrow(() -> new UnauthorizedException("Authentication required"));
-        return new MeResponse(user.getId(), normalizeEmail(user.getEmail()), user.getAvatarUrl());
+        return new MeResponse(
+                user.getId(),
+                normalizeEmail(user.getEmail()),
+                user.getAvatarUrl(),
+                user.getPlanCode());
     }
 
     private void mergeGooglePictureIfAbsent(UserEntity user, GoogleSignInClaims claims) {
@@ -296,7 +303,7 @@ public class AuthService {
         return new AuthTokensResponse(
                 access,
                 refresh.raw(),
-                new AuthUserResponse(user.getId(), normalizedEmail, user.getAvatarUrl())
+                new AuthUserResponse(user.getId(), normalizedEmail, user.getAvatarUrl(), user.getPlanCode())
         );
     }
 

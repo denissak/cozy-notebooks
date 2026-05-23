@@ -33,4 +33,8 @@ public class UserEntity extends BaseEntity {
 
     @Column(name = "avatar_url", length = 1024)
     private String avatarUrl;
+
+    @Column(name = "plan_code", nullable = false, length = 32)
+    @Builder.Default
+    private String planCode = UserPlan.FREE.code();
 }

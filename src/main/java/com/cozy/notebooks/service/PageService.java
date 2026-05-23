@@ -36,17 +36,20 @@ public class PageService {
     private final NotebookService notebookService;
     private final CurrentUserProvider currentUserProvider;
     private final PageContentHashService hashService;
+    private final UserPlanLimitsService userPlanLimitsService;
 
     public PageService(PageRepository pageRepository,
                        PageMapper pageMapper,
                        NotebookService notebookService,
                        CurrentUserProvider currentUserProvider,
-                       PageContentHashService hashService) {
+                       PageContentHashService hashService,
+                       UserPlanLimitsService userPlanLimitsService) {
         this.pageRepository = pageRepository;
         this.pageMapper = pageMapper;
         this.notebookService = notebookService;
         this.currentUserProvider = currentUserProvider;
         this.hashService = hashService;
+        this.userPlanLimitsService = userPlanLimitsService;
     }
 
     @Transactional(readOnly = true)
@@ -69,6 +72,7 @@ public class PageService {
     public PageResponse create(UUID notebookId, CreatePageRequest request) {
         UUID userId = currentUserProvider.requireId();
         NotebookEntity notebook = notebookService.loadOwned(notebookId);
+        userPlanLimitsService.validateCanCreatePage(userId, notebook.getId());
 
         JsonNode content = requireContent(request.content());
         String hash = hashService.hash(content);

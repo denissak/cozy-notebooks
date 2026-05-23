@@ -1,11 +1,23 @@
 package com.cozy.notebooks.support;
 
+import com.cozy.notebooks.domain.NotebookEntity;
+import com.cozy.notebooks.domain.PageEntity;
+import com.cozy.notebooks.domain.UserPlan;
+import com.cozy.notebooks.repository.NotebookRepository;
+import com.cozy.notebooks.repository.PageRepository;
+import com.cozy.notebooks.repository.UserRepository;
+import com.cozy.notebooks.security.SecurityProperties;
+import org.junit.jupiter.api.BeforeEach;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.MySQLContainer;
+
+import java.time.OffsetDateTime;
+import java.util.UUID;
 
 /**
  * Base class for full-stack integration tests.
@@ -36,6 +48,18 @@ import org.testcontainers.containers.MySQLContainer;
 @ActiveProfiles("test")
 public abstract class AbstractIntegrationTest {
 
+    @Autowired
+    private SecurityProperties securityProperties;
+
+    @Autowired
+    private NotebookRepository notebookRepository;
+
+    @Autowired
+    private PageRepository pageRepository;
+
+    @Autowired
+    private UserRepository userRepository;
+
     private static final boolean USE_LOCAL_MYSQL = MySqlIntegrationSupport.useLocalMysql();
 
     private static MySQLContainer<?> mysql;
@@ -62,6 +86,34 @@ public abstract class AbstractIntegrationTest {
                         t);
             }
         }
+    }
+
+    /**
+     * Mock-mode tests share one dev user; soft-delete its notebooks/pages before each test
+     * so free-plan quota limits do not leak across test methods.
+     */
+    @BeforeEach
+    void resetMockUserQuotaState() {
+        if (!securityProperties.mockUserEnabled()) {
+            return;
+        }
+        UUID mockUserId = securityProperties.mockUserId();
+        OffsetDateTime now = OffsetDateTime.now();
+        for (NotebookEntity notebook : notebookRepository.findByUserIdAndDeletedAtIsNullOrderByPositionAscCreatedAtAsc(
+                mockUserId)) {
+            notebook.setDeletedAt(now);
+            notebookRepository.save(notebook);
+        }
+        for (PageEntity page : pageRepository.findByUserIdAndDeletedAtIsNull(mockUserId)) {
+            page.setDeletedAt(now);
+            pageRepository.save(page);
+        }
+        userRepository.findByIdAndDeletedAtIsNull(mockUserId).ifPresent(user -> {
+            if (!UserPlan.FREE.code().equals(user.getPlanCode())) {
+                user.setPlanCode(UserPlan.FREE.code());
+                userRepository.save(user);
+            }
+        });
     }
 
     @DynamicPropertySource

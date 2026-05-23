@@ -26,15 +26,18 @@ public class NotebookService {
     private final NotebookMapper notebookMapper;
     private final CurrentUserProvider currentUserProvider;
     private final HrefCodeGenerator hrefCodeGenerator;
+    private final UserPlanLimitsService userPlanLimitsService;
 
     public NotebookService(NotebookRepository notebookRepository,
                            NotebookMapper notebookMapper,
                            CurrentUserProvider currentUserProvider,
-                           HrefCodeGenerator hrefCodeGenerator) {
+                           HrefCodeGenerator hrefCodeGenerator,
+                           UserPlanLimitsService userPlanLimitsService) {
         this.notebookRepository = notebookRepository;
         this.notebookMapper = notebookMapper;
         this.currentUserProvider = currentUserProvider;
         this.hrefCodeGenerator = hrefCodeGenerator;
+        this.userPlanLimitsService = userPlanLimitsService;
     }
 
     @Transactional(readOnly = true)
@@ -54,6 +57,7 @@ public class NotebookService {
 
     public NotebookResponse create(CreateNotebookRequest request) {
         UUID userId = currentUserProvider.requireId();
+        userPlanLimitsService.validateCanCreateNotebook(userId);
         for (int attempt = 0; attempt < MAX_HREF_CODE_ALLOCATION_ATTEMPTS; attempt++) {
             String hrefCode = hrefCodeGenerator.generate();
             if (notebookRepository.existsByUserIdAndHrefCode(userId, hrefCode)) {

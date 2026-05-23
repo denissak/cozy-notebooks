@@ -4,6 +4,7 @@ import com.cozy.notebooks.exception.BadRequestException;
 import com.cozy.notebooks.exception.ConflictException;
 import com.cozy.notebooks.exception.ForbiddenException;
 import com.cozy.notebooks.exception.NotFoundException;
+import com.cozy.notebooks.exception.QuotaExceededException;
 import com.cozy.notebooks.exception.UnauthorizedException;
 import com.fasterxml.jackson.databind.exc.InvalidFormatException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -44,6 +45,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ForbiddenException.class)
     public ResponseEntity<ErrorResponse> handleForbidden(ForbiddenException ex, HttpServletRequest req) {
         return build(HttpStatus.FORBIDDEN, "forbidden", ex.getMessage(), req);
+    }
+
+    @ExceptionHandler(QuotaExceededException.class)
+    public ResponseEntity<ErrorResponse> handleQuotaExceeded(QuotaExceededException ex, HttpServletRequest req) {
+        return build(HttpStatus.FORBIDDEN, "quota_exceeded", ex.getMessage(), req);
     }
 
     @ExceptionHandler(UnauthorizedException.class)

@@ -43,7 +43,8 @@ public final class AuthDtos {
     public record AuthUserResponse(
             UUID id,
             String email,
-            @JsonInclude(JsonInclude.Include.ALWAYS) String avatarUrl
+            @JsonInclude(JsonInclude.Include.ALWAYS) String avatarUrl,
+            String planCode
     ) {
     }
 
@@ -65,7 +66,8 @@ public final class AuthDtos {
     public record MeResponse(
             UUID id,
             String email,
-            @JsonInclude(JsonInclude.Include.ALWAYS) String avatarUrl
+            @JsonInclude(JsonInclude.Include.ALWAYS) String avatarUrl,
+            String planCode
     ) {
     }
 }

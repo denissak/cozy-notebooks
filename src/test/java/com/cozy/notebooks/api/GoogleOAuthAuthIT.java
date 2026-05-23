@@ -1,5 +1,7 @@
 package com.cozy.notebooks.api;
 
+import com.cozy.notebooks.domain.UserEntity;
+import com.cozy.notebooks.domain.UserPlan;
 import com.cozy.notebooks.exception.UnauthorizedException;
 import com.cozy.notebooks.repository.UserIdentityRepository;
 import com.cozy.notebooks.repository.UserRepository;
@@ -82,6 +84,9 @@ class GoogleOAuthAuthIT extends AbstractRealAuthIntegrationTest {
         assertThat(userIdentityRepository.count()).isEqualTo(identitiesBefore + 1);
         assertThat(userIdentityRepository.findByProviderAndProviderSubjectAndDeletedAtIsNull(PROVIDER_GOOGLE, sub))
                 .isPresent();
+        UserEntity created = userRepository.findByEmailIgnoreCaseAndDeletedAtIsNull(email.toLowerCase())
+                .orElseThrow();
+        assertThat(created.getPlanCode()).isEqualTo(UserPlan.FREE.code());
     }
 
     @Test

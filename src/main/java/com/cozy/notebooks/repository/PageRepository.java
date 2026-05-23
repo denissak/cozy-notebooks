@@ -9,8 +9,14 @@ import java.util.UUID;
 
 public interface PageRepository extends JpaRepository<PageEntity, UUID> {
 
+    List<PageEntity> findByUserIdAndDeletedAtIsNull(UUID userId);
+
     List<PageEntity> findByNotebookIdAndUserIdAndDeletedAtIsNullOrderByCreatedAtAsc(
             UUID notebookId, UUID userId);
 
     Optional<PageEntity> findByIdAndUserIdAndDeletedAtIsNull(UUID id, UUID userId);
+
+    long countByUserIdAndDeletedAtIsNull(UUID userId);
+
+    long countByUserIdAndNotebookIdAndDeletedAtIsNull(UUID userId, UUID notebookId);
 }

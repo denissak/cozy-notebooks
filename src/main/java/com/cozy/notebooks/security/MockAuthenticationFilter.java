@@ -1,6 +1,8 @@
 package com.cozy.notebooks.security;
 
+import com.cozy.notebooks.logging.MdcKeys;
 import jakarta.servlet.FilterChain;
+import org.slf4j.MDC;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -46,6 +48,7 @@ public class MockAuthenticationFilter extends OncePerRequestFilter {
             AbstractAuthenticationToken token = new MockAuthenticationToken(user);
             token.setAuthenticated(true);
             SecurityContextHolder.getContext().setAuthentication(token);
+            MDC.put(MdcKeys.USER_ID, user.id().toString());
         }
         filterChain.doFilter(request, response);
     }

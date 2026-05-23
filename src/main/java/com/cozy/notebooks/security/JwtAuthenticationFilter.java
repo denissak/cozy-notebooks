@@ -1,7 +1,9 @@
 package com.cozy.notebooks.security;
 
 import com.cozy.notebooks.exception.UnauthorizedException;
+import com.cozy.notebooks.logging.MdcKeys;
 import com.cozy.notebooks.service.JwtService;
+import org.slf4j.MDC;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -59,6 +61,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             BearerAuthenticationToken authentication = new BearerAuthenticationToken(user);
             authentication.setAuthenticated(true);
             SecurityContextHolder.getContext().setAuthentication(authentication);
+            MDC.put(MdcKeys.USER_ID, user.id().toString());
         } catch (UnauthorizedException ex) {
             response.sendError(HttpServletResponse.SC_UNAUTHORIZED);
             return;

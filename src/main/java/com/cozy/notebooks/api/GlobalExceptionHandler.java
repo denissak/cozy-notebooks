@@ -6,12 +6,14 @@ import com.cozy.notebooks.exception.ForbiddenException;
 import com.cozy.notebooks.exception.NotFoundException;
 import com.cozy.notebooks.exception.QuotaExceededException;
 import com.cozy.notebooks.exception.UnauthorizedException;
+import com.cozy.notebooks.logging.MdcKeys;
 import com.fasterxml.jackson.databind.exc.InvalidFormatException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -49,6 +51,8 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(QuotaExceededException.class)
     public ResponseEntity<ErrorResponse> handleQuotaExceeded(QuotaExceededException ex, HttpServletRequest req) {
+        log.warn("Quota exceeded on {} {} requestId={} userId={}",
+                req.getMethod(), req.getRequestURI(), mdc(MdcKeys.REQUEST_ID), mdc(MdcKeys.USER_ID));
         return build(HttpStatus.FORBIDDEN, "quota_exceeded", ex.getMessage(), req);
     }
 
@@ -116,9 +120,15 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleAny(Exception ex, HttpServletRequest req) {
-        log.error("Unhandled exception on {} {}", req.getMethod(), req.getRequestURI(), ex);
+        log.error("Unhandled exception on {} {} requestId={} userId={}",
+                req.getMethod(), req.getRequestURI(), mdc(MdcKeys.REQUEST_ID), mdc(MdcKeys.USER_ID), ex);
         return build(HttpStatus.INTERNAL_SERVER_ERROR, "internal_error",
                 "Unexpected server error", req);
+    }
+
+    private static String mdc(String key) {
+        String value = MDC.get(key);
+        return value == null ? "-" : value;
     }
 
     private ResponseEntity<ErrorResponse> build(HttpStatus status, String code, String message,

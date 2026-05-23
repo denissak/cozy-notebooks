@@ -18,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -37,19 +38,22 @@ public class PageTemplateService {
     private final CurrentUserProvider currentUserProvider;
     private final PageContentHashService hashService;
     private final HrefCodeGenerator hrefCodeGenerator;
+    private final UserActivityLogService activityLogService;
 
     public PageTemplateService(PageTemplateRepository templateRepository,
                                PageTemplateMapper templateMapper,
                                PageService pageService,
                                CurrentUserProvider currentUserProvider,
                                PageContentHashService hashService,
-                               HrefCodeGenerator hrefCodeGenerator) {
+                               HrefCodeGenerator hrefCodeGenerator,
+                               UserActivityLogService activityLogService) {
         this.templateRepository = templateRepository;
         this.templateMapper = templateMapper;
         this.pageService = pageService;
         this.currentUserProvider = currentUserProvider;
         this.hashService = hashService;
         this.hrefCodeGenerator = hrefCodeGenerator;
+        this.activityLogService = activityLogService;
     }
 
     @Transactional(readOnly = true)
@@ -88,6 +92,8 @@ public class PageTemplateService {
                         .builtIn(false)
                         .build();
                 templateRepository.saveAndFlush(entity);
+                activityLogService.logSuccess(userId, UserActivityActions.TEMPLATE_CREATE, "template",
+                        entity.getId(), null);
                 return templateMapper.toResponse(entity);
             } catch (DataIntegrityViolationException ignored) {
                 // Rare unique (user_id, href_code) race; retry with a new candidate.
@@ -122,11 +128,14 @@ public class PageTemplateService {
                 ? template.getName()
                 : request.title();
 
-        return pageService.createFromContent(
+        PageResponse page = pageService.createFromContent(
                 request.notebookId(),
                 title,
                 template.getContentJson()
         );
+        activityLogService.logSuccess(template.getUserId(), UserActivityActions.TEMPLATE_INSTANTIATE, "template",
+                template.getId(), Map.of("pageId", page.id().toString()));
+        return page;
     }
 
     private PageTemplateEntity loadOwned(UUID id) {

@@ -25,6 +25,8 @@ import com.cozy.notebooks.security.CurrentUserProvider;
 import com.cozy.notebooks.service.auth.google.GoogleOAuthTokenVerifier;
 import com.cozy.notebooks.service.auth.google.GoogleSignInClaims;
 import com.cozy.notebooks.service.crypto.Sha256Hex;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,6 +34,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.security.SecureRandom;
 import java.time.OffsetDateTime;
 import java.util.HexFormat;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -41,6 +44,7 @@ public class AuthService {
     public static final String PROVIDER_EMAIL = "email";
     public static final String PROVIDER_GOOGLE = "google";
 
+    private static final Logger log = LoggerFactory.getLogger(AuthService.class);
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
     private static final HexFormat HEX = HexFormat.of();
 
@@ -53,6 +57,7 @@ public class AuthService {
     private final Sha256Hex sha256Hex;
     private final CurrentUserProvider currentUserProvider;
     private final GoogleOAuthTokenVerifier googleOAuthTokenVerifier;
+    private final UserActivityLogService activityLogService;
 
     public AuthService(UserRepository userRepository,
                        UserIdentityRepository userIdentityRepository,
@@ -62,7 +67,8 @@ public class AuthService {
                        AuthProperties authProperties,
                        Sha256Hex sha256Hex,
                        CurrentUserProvider currentUserProvider,
-                       GoogleOAuthTokenVerifier googleOAuthTokenVerifier) {
+                       GoogleOAuthTokenVerifier googleOAuthTokenVerifier,
+                       UserActivityLogService activityLogService) {
         this.userRepository = userRepository;
         this.userIdentityRepository = userIdentityRepository;
         this.refreshTokenSessionRepository = refreshTokenSessionRepository;
@@ -72,6 +78,7 @@ public class AuthService {
         this.sha256Hex = sha256Hex;
         this.currentUserProvider = currentUserProvider;
         this.googleOAuthTokenVerifier = googleOAuthTokenVerifier;
+        this.activityLogService = activityLogService;
     }
 
     @Transactional
@@ -100,26 +107,46 @@ public class AuthService {
                 .build();
         userIdentityRepository.save(identity);
 
-        return issueTokens(user, normalizedEmail, meta);
+        AuthTokensResponse tokens = issueTokens(user, normalizedEmail, meta);
+        log.info("User registered userId={}", userId);
+        activityLogService.logSuccess(userId, UserActivityActions.AUTH_REGISTER, "user", userId, null);
+        return tokens;
     }
 
     @Transactional
     public AuthTokensResponse loginWithEmail(LoginRequest request, ClientMeta meta) {
         String normalizedEmail = normalizeEmail(request.email());
-        UserIdentityEntity identity = userIdentityRepository
-                .findByProviderAndProviderSubjectAndDeletedAtIsNull(PROVIDER_EMAIL, normalizedEmail)
-                .orElseThrow(() -> new UnauthorizedException("Invalid email or password"));
+        Optional<UserIdentityEntity> identityOpt = userIdentityRepository
+                .findByProviderAndProviderSubjectAndDeletedAtIsNull(PROVIDER_EMAIL, normalizedEmail);
+        if (identityOpt.isEmpty()) {
+            log.warn("Email login failed: unknown account");
+            activityLogService.logFailure(null, UserActivityActions.AUTH_LOGIN, null, null,
+                    Map.of("reason", "invalid_credentials"));
+            throw new UnauthorizedException("Invalid email or password");
+        }
 
+        UserIdentityEntity identity = identityOpt.get();
         if (identity.getPasswordHash() == null
                 || !passwordEncoder.matches(request.password(), identity.getPasswordHash())) {
+            log.warn("Email login failed userId={}", identity.getUserId());
+            activityLogService.logFailure(identity.getUserId(), UserActivityActions.AUTH_LOGIN, null, null,
+                    Map.of("reason", "invalid_credentials"));
             throw new UnauthorizedException("Invalid email or password");
         }
 
         identity.setLastLoginAt(OffsetDateTime.now());
         UserEntity user = userRepository.findByIdAndDeletedAtIsNull(identity.getUserId())
-                .orElseThrow(() -> new UnauthorizedException("Invalid email or password"));
+                .orElseThrow(() -> {
+                    log.warn("Email login failed: user missing for identity");
+                    activityLogService.logFailure(identity.getUserId(), UserActivityActions.AUTH_LOGIN, null, null,
+                            Map.of("reason", "invalid_credentials"));
+                    return new UnauthorizedException("Invalid email or password");
+                });
 
-        return issueTokens(user, normalizedEmail, meta);
+        AuthTokensResponse tokens = issueTokens(user, normalizedEmail, meta);
+        log.info("Email login succeeded userId={}", user.getId());
+        activityLogService.logSuccess(user.getId(), UserActivityActions.AUTH_LOGIN, "user", user.getId(), null);
+        return tokens;
     }
 
     /**
@@ -136,9 +163,19 @@ public class AuthService {
     @Transactional
     public AuthTokensResponse loginWithGoogle(GoogleLoginRequest request, ClientMeta meta) {
         validateGoogleAuthConfigured();
-        GoogleSignInClaims claims = googleOAuthTokenVerifier.verify(request.idToken());
+        GoogleSignInClaims claims;
+        try {
+            claims = googleOAuthTokenVerifier.verify(request.idToken());
+        } catch (RuntimeException ex) {
+            log.warn("Google login failed: token verification failed");
+            activityLogService.logFailure(null, UserActivityActions.AUTH_GOOGLE_LOGIN, null, null,
+                    Map.of("reason", "token_invalid"));
+            throw ex;
+        }
 
         if (claims.email() == null || claims.email().isBlank()) {
+            activityLogService.logFailure(null, UserActivityActions.AUTH_GOOGLE_LOGIN, null, null,
+                    Map.of("reason", "email_required"));
             throw new BadRequestException("Google account email is required");
         }
 
@@ -156,30 +193,44 @@ public class AuthService {
             UserEntity user = userRepository.findByIdAndDeletedAtIsNull(googleIdentity.getUserId())
                     .orElseThrow(() -> new UnauthorizedException("Invalid Google ID token"));
             mergeGooglePictureIfAbsent(user, claims);
-            return issueTokens(user, normalizeEmail(user.getEmail()), meta);
+            return completeGoogleLogin(issueTokens(user, normalizeEmail(user.getEmail()), meta), meta);
         }
 
         if (claims.emailVerified()) {
             Optional<UserIdentityEntity> emailIdentity = userIdentityRepository
                     .findByProviderAndProviderSubjectAndDeletedAtIsNull(PROVIDER_EMAIL, normalizedEmail);
             if (emailIdentity.isPresent()) {
-                return createLinkedGoogleIdentity(emailIdentity.get().getUserId(), claims, normalizedEmail, meta);
+                return completeGoogleLogin(
+                        createLinkedGoogleIdentity(emailIdentity.get().getUserId(), claims, normalizedEmail, meta),
+                        meta);
             }
             Optional<UserEntity> userByEmail = userRepository.findByEmailIgnoreCaseAndDeletedAtIsNull(normalizedEmail);
             if (userByEmail.isPresent()) {
-                return createLinkedGoogleIdentity(userByEmail.get().getId(), claims, normalizedEmail, meta);
+                return completeGoogleLogin(
+                        createLinkedGoogleIdentity(userByEmail.get().getId(), claims, normalizedEmail, meta),
+                        meta);
             }
-            return createNewGoogleUser(claims, normalizedEmail, meta);
+            return completeGoogleLogin(createNewGoogleUser(claims, normalizedEmail, meta), meta);
         }
 
         if (userRepository.findByEmailIgnoreCaseAndDeletedAtIsNull(normalizedEmail).isPresent()
                 || userIdentityRepository.findByProviderAndProviderSubjectAndDeletedAtIsNull(PROVIDER_EMAIL,
                         normalizedEmail).isPresent()) {
+            log.warn("Google login failed: email conflict for unverified account");
+            activityLogService.logFailure(null, UserActivityActions.AUTH_GOOGLE_LOGIN, null, null,
+                    Map.of("reason", "email_conflict"));
             throw new ConflictException(
                     "An account with this email already exists. Verify your Google email or sign in with email and password.");
         }
 
-        return createNewGoogleUser(claims, normalizedEmail, meta);
+        return completeGoogleLogin(createNewGoogleUser(claims, normalizedEmail, meta), meta);
+    }
+
+    private AuthTokensResponse completeGoogleLogin(AuthTokensResponse tokens, ClientMeta meta) {
+        UUID userId = tokens.user().id();
+        log.info("Google login succeeded userId={}", userId);
+        activityLogService.logSuccess(userId, UserActivityActions.AUTH_GOOGLE_LOGIN, "user", userId, null);
+        return tokens;
     }
 
     private void validateGoogleAuthConfigured() {
@@ -242,20 +293,29 @@ public class AuthService {
 
     @Transactional
     public RefreshTokensResponse refreshToken(RefreshRequest request, ClientMeta meta) {
-        RefreshTokenSessionEntity session = loadActiveSession(request.refreshToken());
+        try {
+            RefreshTokenSessionEntity session = loadActiveSession(request.refreshToken());
 
-        UserEntity user = userRepository.findByIdAndDeletedAtIsNull(session.getUserId())
-                .orElseThrow(() -> new UnauthorizedException("Invalid or expired refresh token"));
+            UserEntity user = userRepository.findByIdAndDeletedAtIsNull(session.getUserId())
+                    .orElseThrow(() -> new UnauthorizedException("Invalid or expired refresh token"));
 
-        session.setRevokedAt(OffsetDateTime.now());
-        refreshTokenSessionRepository.save(session);
+            session.setRevokedAt(OffsetDateTime.now());
+            refreshTokenSessionRepository.save(session);
 
-        String normalizedEmail = user.getEmail();
-        RawRefreshToken rotated = newRawRefreshToken();
-        persistSession(user.getId(), rotated, meta);
+            String normalizedEmail = user.getEmail();
+            RawRefreshToken rotated = newRawRefreshToken();
+            persistSession(user.getId(), rotated, meta);
 
-        String access = jwtService.createAccessToken(user.getId(), normalizedEmail);
-        return new RefreshTokensResponse(access, rotated.raw());
+            String access = jwtService.createAccessToken(user.getId(), normalizedEmail);
+            log.info("Refresh token rotated userId={}", user.getId());
+            activityLogService.logSuccess(user.getId(), UserActivityActions.AUTH_REFRESH, "user", user.getId(), null);
+            return new RefreshTokensResponse(access, rotated.raw());
+        } catch (UnauthorizedException ex) {
+            log.warn("Refresh token failed");
+            activityLogService.logFailure(null, UserActivityActions.AUTH_REFRESH, null, null,
+                    Map.of("reason", "invalid_token"));
+            throw ex;
+        }
     }
 
     @Transactional
@@ -271,6 +331,9 @@ public class AuthService {
         }
         session.setRevokedAt(OffsetDateTime.now());
         refreshTokenSessionRepository.save(session);
+        log.info("Logout succeeded userId={}", session.getUserId());
+        activityLogService.logSuccess(session.getUserId(), UserActivityActions.AUTH_LOGOUT, "user",
+                session.getUserId(), null);
     }
 
     @Transactional(readOnly = true)

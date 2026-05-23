@@ -5,21 +5,26 @@ import com.cozy.notebooks.api.dto.NotebookDtos.NotebookResponse;
 import com.cozy.notebooks.api.dto.NotebookDtos.UpdateNotebookRequest;
 import com.cozy.notebooks.domain.NotebookEntity;
 import com.cozy.notebooks.exception.NotFoundException;
+import com.cozy.notebooks.exception.QuotaExceededException;
 import com.cozy.notebooks.repository.NotebookRepository;
 import com.cozy.notebooks.security.CurrentUserProvider;
 import com.cozy.notebooks.service.mapper.NotebookMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
 @Transactional
 public class NotebookService {
 
+    private static final Logger log = LoggerFactory.getLogger(NotebookService.class);
     private static final int MAX_HREF_CODE_ALLOCATION_ATTEMPTS = 64;
 
     private final NotebookRepository notebookRepository;
@@ -27,17 +32,20 @@ public class NotebookService {
     private final CurrentUserProvider currentUserProvider;
     private final HrefCodeGenerator hrefCodeGenerator;
     private final UserPlanLimitsService userPlanLimitsService;
+    private final UserActivityLogService activityLogService;
 
     public NotebookService(NotebookRepository notebookRepository,
                            NotebookMapper notebookMapper,
                            CurrentUserProvider currentUserProvider,
                            HrefCodeGenerator hrefCodeGenerator,
-                           UserPlanLimitsService userPlanLimitsService) {
+                           UserPlanLimitsService userPlanLimitsService,
+                           UserActivityLogService activityLogService) {
         this.notebookRepository = notebookRepository;
         this.notebookMapper = notebookMapper;
         this.currentUserProvider = currentUserProvider;
         this.hrefCodeGenerator = hrefCodeGenerator;
         this.userPlanLimitsService = userPlanLimitsService;
+        this.activityLogService = activityLogService;
     }
 
     @Transactional(readOnly = true)
@@ -57,7 +65,14 @@ public class NotebookService {
 
     public NotebookResponse create(CreateNotebookRequest request) {
         UUID userId = currentUserProvider.requireId();
-        userPlanLimitsService.validateCanCreateNotebook(userId);
+        try {
+            userPlanLimitsService.validateCanCreateNotebook(userId);
+        } catch (QuotaExceededException ex) {
+            log.warn("Notebook quota exceeded userId={}", userId);
+            activityLogService.logFailure(userId, UserActivityActions.QUOTA_EXCEEDED, "notebook", null,
+                    Map.of("resource", "notebook"));
+            throw ex;
+        }
         for (int attempt = 0; attempt < MAX_HREF_CODE_ALLOCATION_ATTEMPTS; attempt++) {
             String hrefCode = hrefCodeGenerator.generate();
             if (notebookRepository.existsByUserIdAndHrefCode(userId, hrefCode)) {
@@ -75,6 +90,8 @@ public class NotebookService {
                         .position(request.position() == null ? 0 : request.position())
                         .build();
                 notebookRepository.saveAndFlush(entity);
+                activityLogService.logSuccess(userId, UserActivityActions.NOTEBOOK_CREATE, "notebook",
+                        entity.getId(), null);
                 return notebookMapper.toResponse(entity);
             } catch (DataIntegrityViolationException ignored) {
                 // Rare unique (user_id, href_code) race; retry with a new candidate.
@@ -90,13 +107,18 @@ public class NotebookService {
         if (request.color() != null) entity.setColor(request.color());
         if (request.icon() != null) entity.setIcon(request.icon());
         if (request.position() != null) entity.setPosition(request.position());
-        return notebookMapper.toResponse(notebookRepository.save(entity));
+        NotebookEntity saved = notebookRepository.save(entity);
+        activityLogService.logSuccess(entity.getUserId(), UserActivityActions.NOTEBOOK_UPDATE, "notebook",
+                saved.getId(), null);
+        return notebookMapper.toResponse(saved);
     }
 
     public void delete(UUID id) {
         NotebookEntity entity = loadOwned(id);
         entity.setDeletedAt(OffsetDateTime.now());
         notebookRepository.save(entity);
+        activityLogService.logSuccess(entity.getUserId(), UserActivityActions.NOTEBOOK_DELETE, "notebook",
+                entity.getId(), null);
     }
 
     NotebookEntity loadOwned(UUID id) {

@@ -1,0 +1,20 @@
+CREATE TABLE user_activity_log (
+    id             CHAR(36)     NOT NULL,
+    user_id        CHAR(36)     NULL,
+    action         VARCHAR(64)  NOT NULL,
+    entity_type    VARCHAR(64)  NULL,
+    entity_id      CHAR(36)     NULL,
+    status         VARCHAR(32)  NOT NULL,
+    metadata_json  JSON         NULL,
+    ip_address     VARCHAR(64)  NULL,
+    user_agent     VARCHAR(512) NULL,
+    request_id     VARCHAR(64)  NULL,
+    created_at     TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    KEY ix_user_activity_user_created (user_id, created_at),
+    KEY ix_user_activity_action_created (action, created_at),
+    KEY ix_user_activity_request_id (request_id),
+    KEY ix_user_activity_entity (entity_type, entity_id),
+    CONSTRAINT fk_user_activity_user FOREIGN KEY (user_id) REFERENCES users (id),
+    CONSTRAINT ck_user_activity_status CHECK (status IN ('success', 'failure'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

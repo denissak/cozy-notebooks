@@ -8,15 +8,19 @@ import com.cozy.notebooks.domain.PageEntity;
 import com.cozy.notebooks.exception.BadRequestException;
 import com.cozy.notebooks.exception.ConflictException;
 import com.cozy.notebooks.exception.NotFoundException;
+import com.cozy.notebooks.exception.QuotaExceededException;
 import com.cozy.notebooks.repository.PageRepository;
 import com.cozy.notebooks.security.CurrentUserProvider;
 import com.cozy.notebooks.service.mapper.PageMapper;
 import com.fasterxml.jackson.databind.JsonNode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -31,25 +35,30 @@ import java.util.UUID;
 @Transactional
 public class PageService {
 
+    private static final Logger log = LoggerFactory.getLogger(PageService.class);
+
     private final PageRepository pageRepository;
     private final PageMapper pageMapper;
     private final NotebookService notebookService;
     private final CurrentUserProvider currentUserProvider;
     private final PageContentHashService hashService;
     private final UserPlanLimitsService userPlanLimitsService;
+    private final UserActivityLogService activityLogService;
 
     public PageService(PageRepository pageRepository,
                        PageMapper pageMapper,
                        NotebookService notebookService,
                        CurrentUserProvider currentUserProvider,
                        PageContentHashService hashService,
-                       UserPlanLimitsService userPlanLimitsService) {
+                       UserPlanLimitsService userPlanLimitsService,
+                       UserActivityLogService activityLogService) {
         this.pageRepository = pageRepository;
         this.pageMapper = pageMapper;
         this.notebookService = notebookService;
         this.currentUserProvider = currentUserProvider;
         this.hashService = hashService;
         this.userPlanLimitsService = userPlanLimitsService;
+        this.activityLogService = activityLogService;
     }
 
     @Transactional(readOnly = true)
@@ -72,7 +81,14 @@ public class PageService {
     public PageResponse create(UUID notebookId, CreatePageRequest request) {
         UUID userId = currentUserProvider.requireId();
         NotebookEntity notebook = notebookService.loadOwned(notebookId);
-        userPlanLimitsService.validateCanCreatePage(userId, notebook.getId());
+        try {
+            userPlanLimitsService.validateCanCreatePage(userId, notebook.getId());
+        } catch (QuotaExceededException ex) {
+            log.warn("Page quota exceeded userId={} notebookId={}", userId, notebook.getId());
+            activityLogService.logFailure(userId, UserActivityActions.QUOTA_EXCEEDED, "page", null,
+                    Map.of("resource", "page", "notebookId", notebook.getId().toString()));
+            throw ex;
+        }
 
         JsonNode content = requireContent(request.content());
         String hash = hashService.hash(content);
@@ -86,7 +102,9 @@ public class PageService {
                 .contentHash(hash)
                 .version(1L)
                 .build();
-        return pageMapper.toResponse(pageRepository.save(entity));
+        PageEntity saved = pageRepository.save(entity);
+        activityLogService.logSuccess(userId, UserActivityActions.PAGE_CREATE, "page", saved.getId(), null);
+        return pageMapper.toResponse(saved);
     }
 
     /**
@@ -114,13 +132,18 @@ public class PageService {
         entity.setContentHash(hashService.hash(content));
         entity.setVersion(entity.getVersion() + 1);
 
-        return pageMapper.toResponse(pageRepository.save(entity));
+        PageEntity saved = pageRepository.save(entity);
+        activityLogService.logSuccess(saved.getUserId(), UserActivityActions.PAGE_UPDATE, "page",
+                saved.getId(), null);
+        return pageMapper.toResponse(saved);
     }
 
     public void delete(UUID id) {
         PageEntity entity = loadOwned(id);
         entity.setDeletedAt(OffsetDateTime.now());
         pageRepository.save(entity);
+        activityLogService.logSuccess(entity.getUserId(), UserActivityActions.PAGE_DELETE, "page",
+                entity.getId(), null);
     }
 
     PageEntity loadOwned(UUID id) {

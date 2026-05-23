@@ -1,8 +1,11 @@
 package com.cozy.notebooks.security;
 
+import com.cozy.notebooks.logging.RequestIdFilter;
 import com.cozy.notebooks.service.JwtService;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.Ordered;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -59,6 +62,13 @@ public class SecurityConfig {
                 .addFilterBefore(jwtAuthenticationFilter, MockAuthenticationFilter.class);
 
         return http.build();
+    }
+
+    @Bean
+    FilterRegistrationBean<RequestIdFilter> requestIdFilterRegistration() {
+        FilterRegistrationBean<RequestIdFilter> registration = new FilterRegistrationBean<>(new RequestIdFilter());
+        registration.setOrder(Ordered.HIGHEST_PRECEDENCE);
+        return registration;
     }
 
     @Bean
